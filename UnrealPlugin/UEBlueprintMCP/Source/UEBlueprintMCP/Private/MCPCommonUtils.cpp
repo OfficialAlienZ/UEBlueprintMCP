@@ -93,7 +93,21 @@ UBlueprint* FMCPCommonUtils::FindBlueprint(const FString& BlueprintName)
 {
 	if (BlueprintName.IsEmpty()) return nullptr;
 
-	// Search asset registry for all blueprint types (including Widget Blueprints)
+	// Fast path: full asset path ("/Game/Folder/BP_Name" or "/Game/Folder/BP_Name.BP_Name").
+	// Unambiguous and skips the Asset Registry scan entirely.
+	if (BlueprintName.StartsWith(TEXT("/")))
+	{
+		FString ObjectPath = BlueprintName;
+		if (!ObjectPath.Contains(TEXT(".")))
+		{
+			FString ShortName;
+			ObjectPath.Split(TEXT("/"), nullptr, &ShortName, ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+			ObjectPath = ObjectPath + TEXT(".") + ShortName;
+		}
+		return LoadObject<UBlueprint>(nullptr, *ObjectPath);
+	}
+
+	// Slow path: short name. Search asset registry for all blueprint types (including Widget Blueprints)
 	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 	IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
 
@@ -104,15 +118,24 @@ UBlueprint* FMCPCommonUtils::FindBlueprint(const FString& BlueprintName)
 	TArray<FAssetData> AssetList;
 	AssetRegistry.GetAssets(Filter, AssetList);
 
+	const FAssetData* Match = nullptr;
+	int32 MatchCount = 0;
 	for (const FAssetData& AssetData : AssetList)
 	{
 		if (AssetData.AssetName.ToString() == BlueprintName)
 		{
-			return Cast<UBlueprint>(AssetData.GetAsset());
+			if (!Match) Match = &AssetData;
+			++MatchCount;
 		}
 	}
 
-	return nullptr;
+	if (MatchCount > 1)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("UEBlueprintMCP: Blueprint name '%s' is ambiguous (%d matches); using %s. Pass the full asset path (e.g. /Game/Folder/%s) to disambiguate."),
+			*BlueprintName, MatchCount, *Match->PackageName.ToString(), *BlueprintName);
+	}
+
+	return Match ? Cast<UBlueprint>(Match->GetAsset()) : nullptr;
 }
 
 UEdGraph* FMCPCommonUtils::FindOrCreateEventGraph(UBlueprint* Blueprint)
