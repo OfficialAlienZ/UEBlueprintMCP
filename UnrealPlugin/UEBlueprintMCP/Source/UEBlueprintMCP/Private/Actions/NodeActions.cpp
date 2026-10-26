@@ -188,7 +188,7 @@ TSharedPtr<FJsonObject> FFindBlueprintNodesAction::ExecuteInternal(const TShared
 				{
 					bMatch = true;
 				}
-				else if (CustomNode->CustomFunctionName == EventName)
+				else if (CustomNode->CustomFunctionName == FName(*EventName))
 				{
 					bMatch = true;
 				}
@@ -532,8 +532,7 @@ TSharedPtr<FJsonObject> FAddBlueprintCustomEventAction::ExecuteInternal(const TS
 					if (ParamType.Equals(TEXT("Float"), ESearchCase::IgnoreCase) ||
 						ParamType.Equals(TEXT("Double"), ESearchCase::IgnoreCase))
 					{
-						PinType.PinCategory = UEdGraphSchema_K2::PC_Real;
-						PinType.PinSubCategory = UEdGraphSchema_K2::PC_Double;
+						MCPCompat::SetRealPinType(PinType);
 					}
 					else if (ParamType.Equals(TEXT("Boolean"), ESearchCase::IgnoreCase) ||
 							 ParamType.Equals(TEXT("Bool"), ESearchCase::IgnoreCase))
@@ -1119,11 +1118,25 @@ TSharedPtr<FJsonObject> FAddBlueprintGetSubsystemNodeAction::ExecuteInternal(con
 		return CreateErrorResponse(FString::Printf(TEXT("Subsystem class not found: %s. Try full path like /Script/EnhancedInput.EnhancedInputLocalPlayerSubsystem"), *SubsystemClassName));
 	}
 
-	// Create the K2Node_GetSubsystemFromPC node (gets subsystem from PlayerController)
-	UK2Node_GetSubsystemFromPC* SubsystemNode = FEdGraphSchemaAction_K2NewNode::SpawnNode<UK2Node_GetSubsystemFromPC>(
-		EventGraph, Position, EK2NewNodeFlags::None,
-		[FoundClass](UK2Node_GetSubsystemFromPC* Node) { Node->Initialize(FoundClass); }
-	);
+	// Create the K2Node_GetSubsystemFromPC node (gets subsystem from PlayerController).
+	// The class is not exported from BlueprintGraph on UE4, so it is looked up by name and
+	// initialised through its exported base class UK2Node_GetSubsystem.
+	UClass* SubsystemNodeClass = FindObject<UClass>(nullptr, TEXT("/Script/BlueprintGraph.K2Node_GetSubsystemFromPC"));
+	if (!SubsystemNodeClass)
+	{
+		return CreateErrorResponse(TEXT("K2Node_GetSubsystemFromPC class not found in this engine version"), TEXT("not_found"));
+	}
+
+	UK2Node_GetSubsystem* SubsystemNode = Cast<UK2Node_GetSubsystem>(FEdGraphSchemaAction_K2NewNode::CreateNode(
+		EventGraph, TArrayView<UEdGraphPin*>(), Position,
+		[SubsystemNodeClass](UEdGraph* InGraph) -> UK2Node* { return NewObject<UK2Node>(InGraph, SubsystemNodeClass); },
+		[FoundClass](UK2Node* Node) { CastChecked<UK2Node_GetSubsystem>(Node)->Initialize(FoundClass); },
+		EK2NewNodeFlags::None
+	));
+	if (!SubsystemNode)
+	{
+		return CreateErrorResponse(TEXT("Failed to create subsystem node"), TEXT("execution_failed"));
+	}
 
 	MarkBlueprintModified(Blueprint, Context);
 	RegisterCreatedNode(SubsystemNode, Context);
@@ -1220,8 +1233,7 @@ TSharedPtr<FJsonObject> FCreateBlueprintFunctionAction::ExecuteInternal(const TS
 			if (ParamType.Equals(TEXT("Float"), ESearchCase::IgnoreCase) ||
 				ParamType.Equals(TEXT("Double"), ESearchCase::IgnoreCase))
 			{
-				PinType.PinCategory = UEdGraphSchema_K2::PC_Real;
-				PinType.PinSubCategory = UEdGraphSchema_K2::PC_Double;
+				MCPCompat::SetRealPinType(PinType);
 			}
 			else if (ParamType.Equals(TEXT("Boolean"), ESearchCase::IgnoreCase))
 			{
@@ -1242,8 +1254,7 @@ TSharedPtr<FJsonObject> FCreateBlueprintFunctionAction::ExecuteInternal(const TS
 			}
 			else
 			{
-				PinType.PinCategory = UEdGraphSchema_K2::PC_Real;
-				PinType.PinSubCategory = UEdGraphSchema_K2::PC_Double;
+				MCPCompat::SetRealPinType(PinType);
 			}
 
 			EntryNode->CreateUserDefinedPin(FName(*ParamName), PinType, EGPD_Output);
@@ -1275,8 +1286,7 @@ TSharedPtr<FJsonObject> FCreateBlueprintFunctionAction::ExecuteInternal(const TS
 			if (ParamType.Equals(TEXT("Float"), ESearchCase::IgnoreCase) ||
 				ParamType.Equals(TEXT("Double"), ESearchCase::IgnoreCase))
 			{
-				PinType.PinCategory = UEdGraphSchema_K2::PC_Real;
-				PinType.PinSubCategory = UEdGraphSchema_K2::PC_Double;
+				MCPCompat::SetRealPinType(PinType);
 			}
 			else if (ParamType.Equals(TEXT("Boolean"), ESearchCase::IgnoreCase))
 			{
@@ -1297,8 +1307,7 @@ TSharedPtr<FJsonObject> FCreateBlueprintFunctionAction::ExecuteInternal(const TS
 			}
 			else
 			{
-				PinType.PinCategory = UEdGraphSchema_K2::PC_Real;
-				PinType.PinSubCategory = UEdGraphSchema_K2::PC_Double;
+				MCPCompat::SetRealPinType(PinType);
 			}
 
 			ResultNode->CreateUserDefinedPin(FName(*ParamName), PinType, EGPD_Input);

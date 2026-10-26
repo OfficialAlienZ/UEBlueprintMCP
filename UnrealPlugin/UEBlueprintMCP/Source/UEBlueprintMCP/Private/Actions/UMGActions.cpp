@@ -108,11 +108,11 @@ TSharedPtr<FJsonObject> FCreateUMGWidgetBlueprintAction::ExecuteInternal(const T
 				FString TempName = FString::Printf(TEXT("%s_OLD_%d"), *AssetName, FMath::Rand());
 				ExistingBP->Rename(*TempName, GetTransientPackage(), REN_DoNotDirty | REN_DontCreateRedirectors | REN_NonTransactional | REN_ForceNoResetLoaders);
 				ExistingBP->ClearFlags(RF_Public | RF_Standalone);
-				ExistingBP->MarkAsGarbage();
+				MCPCompat::MarkGarbage(ExistingBP);
 			}
 
 			ExistingPackage->ClearFlags(RF_Public | RF_Standalone);
-			ExistingPackage->MarkAsGarbage();
+			MCPCompat::MarkGarbage(ExistingPackage);
 		}
 	}
 

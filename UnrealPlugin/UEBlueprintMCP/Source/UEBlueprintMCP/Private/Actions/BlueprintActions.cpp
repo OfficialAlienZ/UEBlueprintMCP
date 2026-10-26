@@ -197,8 +197,8 @@ void FCreateBlueprintAction::CleanupExistingBlueprint(const FString& BlueprintNa
 			FString TempName = FString::Printf(TEXT("%s_TEMP_%d"), *BlueprintName, FMath::Rand());
 			ExistingBlueprint->Rename(*TempName, GetTransientPackage(),
 				REN_DoNotDirty | REN_DontCreateRedirectors | REN_NonTransactional);
-			ExistingBlueprint->MarkAsGarbage();
-			ExistingPackage->MarkAsGarbage();
+			MCPCompat::MarkGarbage(ExistingBlueprint);
+			MCPCompat::MarkGarbage(ExistingPackage);
 		}
 	}
 
@@ -255,7 +255,7 @@ TSharedPtr<FJsonObject> FCompileBlueprintAction::ExecuteInternal(const TSharedPt
 	if (bSuccess)
 	{
 		TArray<UPackage*> DirtyPackages;
-		FEditorFileUtils::GetDirtyPackages(DirtyPackages);
+		MCPCompat::GetDirtyPackages(DirtyPackages);
 
 		for (UPackage* Package : DirtyPackages)
 		{
@@ -268,11 +268,8 @@ TSharedPtr<FJsonObject> FCompileBlueprintAction::ExecuteInternal(const TSharedPt
 
 				if (FPackageName::TryConvertLongPackageNameToFilename(PackageName, PackageFileName, Extension))
 				{
-					FSavePackageArgs SaveArgs;
-					SaveArgs.TopLevelFlags = RF_Standalone;
-
 					UObject* AssetToSave = bIsMap ? Package->FindAssetInPackage() : nullptr;
-					if (UPackage::SavePackage(Package, AssetToSave, *PackageFileName, SaveArgs))
+					if (MCPCompat::SavePackageToDisk(Package, AssetToSave, PackageFileName, RF_Standalone))
 					{
 						SavedPackagesCount++;
 					}
@@ -821,7 +818,11 @@ TSharedPtr<FJsonObject> FSetStaticMeshPropertiesAction::ExecuteInternal(const TS
 		UMaterialInterface* OverlayMaterial = Cast<UMaterialInterface>(UEditorAssetLibrary::LoadAsset(OverlayMaterialPath));
 		if (OverlayMaterial)
 		{
+#if MCP_UE5
 			MeshComponent->SetOverlayMaterial(OverlayMaterial);
+#else
+			UE_LOG(LogTemp, Warning, TEXT("UEBlueprintMCP: overlay_material is not supported before UE 5.0, ignoring"));
+#endif
 		}
 	}
 
@@ -1025,8 +1026,8 @@ TSharedPtr<FJsonObject> FCreateColoredMaterialAction::ExecuteInternal(const TSha
 			FString TempName = FString::Printf(TEXT("%s_TEMP_%d"), *MaterialName, FMath::Rand());
 			ExistingMaterial->Rename(*TempName, GetTransientPackage(),
 				REN_DoNotDirty | REN_DontCreateRedirectors | REN_NonTransactional);
-			ExistingMaterial->MarkAsGarbage();
-			ExistingPackage->MarkAsGarbage();
+			MCPCompat::MarkGarbage(ExistingMaterial);
+			MCPCompat::MarkGarbage(ExistingPackage);
 		}
 	}
 
@@ -1057,10 +1058,10 @@ TSharedPtr<FJsonObject> FCreateColoredMaterialAction::ExecuteInternal(const TSha
 	// Create color expression
 	UMaterialExpressionConstant3Vector* ColorExpression = NewObject<UMaterialExpressionConstant3Vector>(NewMaterial);
 	ColorExpression->Constant = FLinearColor(R, G, B);
-	NewMaterial->GetExpressionCollection().AddExpression(ColorExpression);
+	MCPCompat::AddMaterialExpression(NewMaterial, ColorExpression);
 
 	// Connect to BaseColor
-	NewMaterial->GetEditorOnlyData()->BaseColor.Expression = ColorExpression;
+	MCPCompat::GetMaterialInputs(NewMaterial)->BaseColor.Expression = ColorExpression;
 
 	// Trigger shader compilation
 	NewMaterial->PreEditChange(nullptr);
@@ -1078,9 +1079,7 @@ TSharedPtr<FJsonObject> FCreateColoredMaterialAction::ExecuteInternal(const TSha
 
 	// Save
 	FString PackageFileName = FPackageName::LongPackageNameToFilename(MaterialPackagePath, FPackageName::GetAssetPackageExtension());
-	FSavePackageArgs SaveArgs;
-	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
-	UPackage::SavePackage(Package, NewMaterial, *PackageFileName, SaveArgs);
+	MCPCompat::SavePackageToDisk(Package, NewMaterial, PackageFileName, RF_Public | RF_Standalone);
 
 	UE_LOG(LogTemp, Log, TEXT("UEBlueprintMCP: Created material '%s' with color (%.2f, %.2f, %.2f)"),
 		*MaterialName, R, G, B);

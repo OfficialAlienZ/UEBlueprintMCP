@@ -2,7 +2,7 @@
 
 ## Overview
 
-UEBlueprintMCP is a Model Context Protocol (MCP) server that enables AI-assisted manipulation of Unreal Engine 5.7+ Blueprints, Materials, Widgets, and Editor state through a persistent TCP connection.
+UEBlueprintMCP is a Model Context Protocol (MCP) server that enables AI-assisted manipulation of Unreal Engine 4.27 and 5.x Blueprints, Materials, Widgets, and Editor state through a persistent TCP connection.
 
 ## Repository Structure
 
@@ -275,6 +275,22 @@ After modifying the C++ plugin:
 3. Launch Unreal Editor
 4. Reconnect MCP (`/mcp` in Claude Code)
 5. Test the modified command
+
+## UE 4.27 Compatibility Notes
+
+All engine-version differences live in `Public/MCPCompat.h` (`MCP_UE5` macro, `MCPCompat::` helpers). Keep `#if` blocks out of action code. Verify with:
+`RunUAT.sh BuildPlugin -Plugin=<path>/UEBlueprintMCP.uplugin -Package=/tmp/out -TargetPlatforms=Mac -Rocket`
+
+UE4 differences handled:
+- `MarkAsGarbage` → `MarkPendingKill`; `UPackage::SavePackage(Pkg, Asset, Flags, Filename)`
+- `FEditorFileUtils::GetDirtyPackages` → `GetDirtyWorldPackages` + `GetDirtyContentPackages`
+- Asset registry: `ClassNames` / `GetFName()` instead of `ClassPaths` / `GetClassPathName()`
+- Materials: `Material->Expressions` and pins directly on `UMaterial` (no `GetExpressionCollection` / `GetEditorOnlyData`)
+- Pins: `PC_Float` instead of `PC_Real` + `PC_Double`
+- `SetOverlayMaterial` does not exist (ignored with a warning)
+- Classes not exported from their modules (linker errors on `StaticClass()`): `UMaterialExpressionSceneTexture/SceneDepth/ScreenPosition/DDX/DDY`, `UK2Node_GetSubsystemFromPC`. Resolve by name with `FindObject<UClass>` and use reflection / the exported base class.
+- Enhanced Input is an experimental engine plugin in 4.27 (declared in the `.uplugin`)
+- `.uplugin` uses no platform allow list (`WhitelistPlatforms` in 4.27 vs `PlatformAllowList` in 5.x)
 
 ## UE 5.7 Compatibility Notes
 

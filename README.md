@@ -1,6 +1,6 @@
 # UEBlueprintMCP
 
-A Model Context Protocol (MCP) server for AI-assisted Unreal Engine 5.7+ Blueprint manipulation with persistent TCP connections and auto-save.
+A Model Context Protocol (MCP) server for AI-assisted Unreal Engine 4.27 / 5.x Blueprint manipulation with persistent TCP connections and auto-save.
 
 ## Features
 
@@ -87,9 +87,9 @@ All editor operations flow through `FEditorAction` subclasses that provide:
 
 ## Requirements
 
-- Unreal Engine 5.7+
+- Unreal Engine 4.27 or 5.x (4.27 requires the experimental Enhanced Input plugin; version differences live in `MCPCompat.h`)
 - Python 3.10+
-- Visual Studio 2022 (for plugin builds)
+- Visual Studio 2022 (Windows) or Xcode (macOS) for plugin builds
 
 ## License
 

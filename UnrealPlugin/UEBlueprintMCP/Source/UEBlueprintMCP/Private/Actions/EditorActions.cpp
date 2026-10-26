@@ -578,9 +578,7 @@ TSharedPtr<FJsonObject> FSaveAllAction::ExecuteInternal(const TSharedPtr<FJsonOb
 				if (FPackageName::TryConvertLongPackageNameToFilename(
 					WorldPackage->GetName(), PackageFilename, FPackageName::GetMapPackageExtension()))
 				{
-					FSavePackageArgs SaveArgs;
-					SaveArgs.TopLevelFlags = RF_Standalone;
-					if (UPackage::SavePackage(WorldPackage, World, *PackageFilename, SaveArgs))
+					if (MCPCompat::SavePackageToDisk(WorldPackage, World, PackageFilename, RF_Standalone))
 					{
 						SavedCount++;
 						SavedPackages.Add(WorldPackage->GetName());
@@ -592,7 +590,7 @@ TSharedPtr<FJsonObject> FSaveAllAction::ExecuteInternal(const TSharedPtr<FJsonOb
 	else
 	{
 		TArray<UPackage*> DirtyPackages;
-		FEditorFileUtils::GetDirtyPackages(DirtyPackages);
+		MCPCompat::GetDirtyPackages(DirtyPackages);
 
 		for (UPackage* Package : DirtyPackages)
 		{
@@ -607,12 +605,9 @@ TSharedPtr<FJsonObject> FSaveAllAction::ExecuteInternal(const TSharedPtr<FJsonOb
 
 			if (FPackageName::TryConvertLongPackageNameToFilename(PackageName, PackageFilename, Extension))
 			{
-				FSavePackageArgs SaveArgs;
-				SaveArgs.TopLevelFlags = RF_Standalone;
-
 				UObject* AssetToSave = bIsMap ? Package->FindAssetInPackage() : nullptr;
 
-				if (UPackage::SavePackage(Package, AssetToSave, *PackageFilename, SaveArgs))
+				if (MCPCompat::SavePackageToDisk(Package, AssetToSave, PackageFilename, RF_Standalone))
 				{
 					SavedCount++;
 					SavedPackages.Add(PackageName);

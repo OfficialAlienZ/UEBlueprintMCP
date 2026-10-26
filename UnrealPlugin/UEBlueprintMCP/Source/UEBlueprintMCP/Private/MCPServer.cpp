@@ -103,7 +103,7 @@ void FMCPServer::Stop()
 	{
 		// Never wait on our own thread - would deadlock if Stop()
 		// is ever called from the server worker thread itself.
-		if (FRunnableThread::GetRunnableThread() != Thread)
+		if (FPlatformTLS::GetCurrentThreadId() != Thread->GetThreadID())
 		{
 			Thread->WaitForCompletion();
 		}

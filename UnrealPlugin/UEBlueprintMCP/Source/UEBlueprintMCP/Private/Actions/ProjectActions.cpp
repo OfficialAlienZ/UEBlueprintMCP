@@ -155,8 +155,8 @@ TSharedPtr<FJsonObject> FCreateInputActionAction::ExecuteInternal(const TSharedP
 			UE_LOG(LogTemp, Log, TEXT("Input Action '%s' already exists, cleaning up for recreation"), *Name);
 			FString TempName = FString::Printf(TEXT("%s_TEMP_%d"), *Name, FMath::Rand());
 			ExistingAction->Rename(*TempName, GetTransientPackage(), REN_DoNotDirty | REN_DontCreateRedirectors | REN_NonTransactional);
-			ExistingAction->MarkAsGarbage();
-			ExistingPackage->MarkAsGarbage();
+			MCPCompat::MarkGarbage(ExistingAction);
+			MCPCompat::MarkGarbage(ExistingPackage);
 		}
 	}
 
@@ -184,10 +184,8 @@ TSharedPtr<FJsonObject> FCreateInputActionAction::ExecuteInternal(const TSharedP
 	FAssetRegistryModule::AssetCreated(NewAction);
 	NewAction->MarkPackageDirty();
 
-	FSavePackageArgs SaveArgs;
-	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
 	FString PackageFilename = FPackageName::LongPackageNameToFilename(PackagePath, FPackageName::GetAssetPackageExtension());
-	UPackage::SavePackage(Package, NewAction, *PackageFilename, SaveArgs);
+	MCPCompat::SavePackageToDisk(Package, NewAction, PackageFilename, RF_Public | RF_Standalone);
 
 	TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
 	ResultObj->SetBoolField(TEXT("success"), true);
@@ -230,8 +228,8 @@ TSharedPtr<FJsonObject> FCreateInputMappingContextAction::ExecuteInternal(const 
 			UE_LOG(LogTemp, Log, TEXT("Input Mapping Context '%s' already exists, cleaning up for recreation"), *Name);
 			FString TempName = FString::Printf(TEXT("%s_TEMP_%d"), *Name, FMath::Rand());
 			ExistingIMC->Rename(*TempName, GetTransientPackage(), REN_DoNotDirty | REN_DontCreateRedirectors | REN_NonTransactional);
-			ExistingIMC->MarkAsGarbage();
-			ExistingPackage->MarkAsGarbage();
+			MCPCompat::MarkGarbage(ExistingIMC);
+			MCPCompat::MarkGarbage(ExistingPackage);
 		}
 	}
 
@@ -257,10 +255,8 @@ TSharedPtr<FJsonObject> FCreateInputMappingContextAction::ExecuteInternal(const 
 	FAssetRegistryModule::AssetCreated(NewIMC);
 	NewIMC->MarkPackageDirty();
 
-	FSavePackageArgs SaveArgs;
-	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
 	FString PackageFilename = FPackageName::LongPackageNameToFilename(PackagePath, FPackageName::GetAssetPackageExtension());
-	UPackage::SavePackage(Package, NewIMC, *PackageFilename, SaveArgs);
+	MCPCompat::SavePackageToDisk(Package, NewIMC, PackageFilename, RF_Public | RF_Standalone);
 
 	TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
 	ResultObj->SetBoolField(TEXT("success"), true);
@@ -374,10 +370,8 @@ TSharedPtr<FJsonObject> FAddKeyMappingToContextAction::ExecuteInternal(const TSh
 	// Save the IMC package
 	IMC->MarkPackageDirty();
 	UPackage* Package = IMC->GetOutermost();
-	FSavePackageArgs SaveArgs;
-	SaveArgs.TopLevelFlags = RF_Public | RF_Standalone;
 	FString PackageFilename = FPackageName::LongPackageNameToFilename(Package->GetName(), FPackageName::GetAssetPackageExtension());
-	UPackage::SavePackage(Package, IMC, *PackageFilename, SaveArgs);
+	MCPCompat::SavePackageToDisk(Package, IMC, PackageFilename, RF_Public | RF_Standalone);
 
 	TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
 	ResultObj->SetBoolField(TEXT("success"), true);

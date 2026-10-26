@@ -1,6 +1,7 @@
 // Copyright (c) 2025 zolnoor. All rights reserved.
 
 #include "MCPCommonUtils.h"
+#include "MCPCompat.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
@@ -98,7 +99,7 @@ UBlueprint* FMCPCommonUtils::FindBlueprint(const FString& BlueprintName)
 
 	FARFilter Filter;
 	Filter.bRecursiveClasses = true;
-	Filter.ClassPaths.Add(UBlueprint::StaticClass()->GetClassPathName());
+	MCPCompat::AddFilterClass(Filter, UBlueprint::StaticClass());
 
 	TArray<FAssetData> AssetList;
 	AssetRegistry.GetAssets(Filter, AssetList);

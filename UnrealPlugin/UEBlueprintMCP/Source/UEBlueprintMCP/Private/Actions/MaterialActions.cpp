@@ -12,7 +12,6 @@
 #include "Materials/MaterialExpressionSubtract.h"
 #include "Materials/MaterialExpressionMultiply.h"
 #include "Materials/MaterialExpressionDivide.h"
-#include "Materials/MaterialExpressionSceneTexture.h"
 #include "Materials/MaterialExpressionNoise.h"
 #include "Materials/MaterialExpressionTime.h"
 #include "Materials/MaterialExpressionScalarParameter.h"
@@ -44,10 +43,6 @@
 #include "Materials/MaterialExpressionWorldPosition.h"
 #include "Materials/MaterialExpressionCameraPositionWS.h"
 #include "Materials/MaterialExpressionPixelDepth.h"
-#include "Materials/MaterialExpressionSceneDepth.h"
-#include "Materials/MaterialExpressionDDX.h"
-#include "Materials/MaterialExpressionDDY.h"
-#include "Materials/MaterialExpressionScreenPosition.h"
 #include "Materials/MaterialExpressionAppendVector.h"
 #include "Materials/MaterialExpressionStep.h"
 #include "Materials/MaterialExpressionSmoothStep.h"
@@ -81,6 +76,33 @@
 static TMap<FString, UClass*> ExpressionClassMap;
 static TMap<FString, EMaterialShadingModel> ShadingModelMap;
 static TMap<FString, EBlendMode> BlendModeMap;
+
+// SceneTexture, SceneDepth, ScreenPosition, DDX and DDY are not exported from the
+// Engine module in UE4 (linker error on StaticClass()), so they are resolved by
+// class name and their inputs/properties are accessed through reflection.
+static bool ExpressionIsA(const UMaterialExpression* Expr, const TCHAR* ClassName)
+{
+	if (!Expr) return false;
+	for (const UClass* Class = Expr->GetClass(); Class; Class = Class->GetSuperClass())
+	{
+		if (Class->GetName() == ClassName) return true;
+	}
+	return false;
+}
+
+static bool SetReflectedExpressionInput(UMaterialExpression* Expr, const TCHAR* PropName,
+	UMaterialExpression* Source, int32 OutputIndex)
+{
+	FStructProperty* Prop = FindFProperty<FStructProperty>(Expr->GetClass(), PropName);
+	if (!Prop || !Prop->Struct || Prop->Struct->GetFName() != FName(TEXT("ExpressionInput")))
+	{
+		return false;
+	}
+	FExpressionInput* Input = Prop->ContainerPtrToValuePtr<FExpressionInput>(Expr);
+	Input->Expression = Source;
+	Input->OutputIndex = OutputIndex;
+	return true;
+}
 
 static void InitShadingModelMap()
 {
@@ -133,10 +155,18 @@ static void InitExpressionClassMap()
 {
 	if (ExpressionClassMap.Num() > 0) return; // Already initialized
 
+	auto AddByName = [](const TCHAR* Key, const TCHAR* ClassPath)
+	{
+		if (UClass* Class = FindObject<UClass>(nullptr, ClassPath))
+		{
+			ExpressionClassMap.Add(Key, Class);
+		}
+	};
+
 	// Scene/Texture access
-	ExpressionClassMap.Add(TEXT("SceneTexture"), UMaterialExpressionSceneTexture::StaticClass());
-	ExpressionClassMap.Add(TEXT("SceneDepth"), UMaterialExpressionSceneDepth::StaticClass());
-	ExpressionClassMap.Add(TEXT("ScreenPosition"), UMaterialExpressionScreenPosition::StaticClass());
+	AddByName(TEXT("SceneTexture"), TEXT("/Script/Engine.MaterialExpressionSceneTexture"));
+	AddByName(TEXT("SceneDepth"), TEXT("/Script/Engine.MaterialExpressionSceneDepth"));
+	AddByName(TEXT("ScreenPosition"), TEXT("/Script/Engine.MaterialExpressionScreenPosition"));
 	ExpressionClassMap.Add(TEXT("TextureCoordinate"), UMaterialExpressionTextureCoordinate::StaticClass());
 	ExpressionClassMap.Add(TEXT("TextureSample"), UMaterialExpressionTextureSample::StaticClass());
 	ExpressionClassMap.Add(TEXT("PixelDepth"), UMaterialExpressionPixelDepth::StaticClass());
@@ -189,8 +219,8 @@ static void InitExpressionClassMap()
 	ExpressionClassMap.Add(TEXT("Panner"), UMaterialExpressionPanner::StaticClass());
 
 	// Derivatives
-	ExpressionClassMap.Add(TEXT("DDX"), UMaterialExpressionDDX::StaticClass());
-	ExpressionClassMap.Add(TEXT("DDY"), UMaterialExpressionDDY::StaticClass());
+	AddByName(TEXT("DDX"), TEXT("/Script/Engine.MaterialExpressionDDX"));
+	AddByName(TEXT("DDY"), TEXT("/Script/Engine.MaterialExpressionDDY"));
 
 	// Control
 	ExpressionClassMap.Add(TEXT("If"), UMaterialExpressionIf::StaticClass());
@@ -211,7 +241,7 @@ UMaterial* FMaterialAction::FindMaterial(const FString& MaterialName, FString& O
 	IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
 
 	TArray<FAssetData> AssetList;
-	AssetRegistry.GetAssetsByClass(UMaterial::StaticClass()->GetClassPathName(), AssetList);
+	MCPCompat::GetAssetsByClass(AssetRegistry, UMaterial::StaticClass(), AssetList);
 
 	for (const FAssetData& AssetData : AssetList)
 	{
@@ -253,8 +283,8 @@ void FMaterialAction::CleanupExistingMaterial(const FString& MaterialName, const
 			FString TempName = FString::Printf(TEXT("%s_TEMP_%d"), *MaterialName, FMath::Rand());
 			ExistingMaterial->Rename(*TempName, GetTransientPackage(),
 				REN_DoNotDirty | REN_DontCreateRedirectors | REN_NonTransactional);
-			ExistingMaterial->MarkAsGarbage();
-			ExistingPackage->MarkAsGarbage();
+			MCPCompat::MarkGarbage(ExistingMaterial);
+			MCPCompat::MarkGarbage(ExistingPackage);
 		}
 	}
 
@@ -479,20 +509,24 @@ void FAddMaterialExpressionAction::SetExpressionProperties(UMaterialExpression* 
 
 	for (const auto& Pair : Properties->Values)
 	{
-		const FString PropName(Pair.Key.ToView());
+		const FString& PropName = Pair.Key;
 		const TSharedPtr<FJsonValue>& PropValue = Pair.Value;
 
 		// Handle specific expression types and their properties
 		// SceneTexture
-		if (UMaterialExpressionSceneTexture* SceneTex = Cast<UMaterialExpressionSceneTexture>(Expression))
+		if (ExpressionIsA(Expression, TEXT("MaterialExpressionSceneTexture")))
 		{
 			if (PropName == TEXT("SceneTextureId"))
 			{
-				FString IdStr = PropValue->AsString();
-				if (IdStr == TEXT("PPI_SceneColor")) SceneTex->SceneTextureId = PPI_SceneColor;
-				else if (IdStr == TEXT("PPI_SceneDepth")) SceneTex->SceneTextureId = PPI_SceneDepth;
-				else if (IdStr == TEXT("PPI_WorldNormal")) SceneTex->SceneTextureId = PPI_WorldNormal;
-				else if (IdStr == TEXT("PPI_PostProcessInput0")) SceneTex->SceneTextureId = PPI_PostProcessInput0;
+				FByteProperty* IdProp = FindFProperty<FByteProperty>(Expression->GetClass(), TEXT("SceneTextureId"));
+				if (IdProp && IdProp->Enum)
+				{
+					const int64 IdValue = IdProp->Enum->GetValueByNameString(PropValue->AsString());
+					if (IdValue != INDEX_NONE)
+					{
+						IdProp->SetIntPropertyValue(IdProp->ContainerPtrToValuePtr<void>(Expression), IdValue);
+					}
+				}
 			}
 		}
 		// Scalar Parameter
@@ -638,7 +672,7 @@ TSharedPtr<FJsonObject> FAddMaterialExpressionAction::ExecuteInternal(const TSha
 	NewExpr->MaterialExpressionEditorY = PosY;
 
 	// Add to material's expression collection
-	Material->GetExpressionCollection().AddExpression(NewExpr);
+	MCPCompat::AddMaterialExpression(Material, NewExpr);
 
 	// Set properties if provided
 	if (Params->HasField(TEXT("properties")))
@@ -791,36 +825,36 @@ bool FConnectMaterialExpressionsAction::ConnectToExpressionInput(UMaterialExpres
 		if (InputName.Equals(TEXT("Input"), ESearchCase::IgnoreCase)) { Abs->Input.Expression = SourceExpr; Abs->Input.OutputIndex = OutputIndex; return true; }
 	}
 	// SceneDepth
-	else if (UMaterialExpressionSceneDepth* SceneDepth = Cast<UMaterialExpressionSceneDepth>(TargetExpr))
+	else if (ExpressionIsA(TargetExpr, TEXT("MaterialExpressionSceneDepth")))
 	{
 		if (InputName.Equals(TEXT("Input"), ESearchCase::IgnoreCase) || InputName.Equals(TEXT("UV"), ESearchCase::IgnoreCase) || InputName.Equals(TEXT("Coordinates"), ESearchCase::IgnoreCase))
 		{
-			SceneDepth->Input.Expression = SourceExpr;
-			SceneDepth->Input.OutputIndex = OutputIndex;
-			return true;
+			if (SetReflectedExpressionInput(TargetExpr, TEXT("Input"), SourceExpr, OutputIndex)) return true;
 		}
 	}
 	// SceneTexture
-	else if (UMaterialExpressionSceneTexture* SceneTexture = Cast<UMaterialExpressionSceneTexture>(TargetExpr))
+	else if (ExpressionIsA(TargetExpr, TEXT("MaterialExpressionSceneTexture")))
 	{
 		if (InputName.Equals(TEXT("UV"), ESearchCase::IgnoreCase) || InputName.Equals(TEXT("Coordinates"), ESearchCase::IgnoreCase))
 		{
-			SceneTexture->Coordinates.Expression = SourceExpr;
-			SceneTexture->Coordinates.OutputIndex = OutputIndex;
-			return true;
+			if (SetReflectedExpressionInput(TargetExpr, TEXT("Coordinates"), SourceExpr, OutputIndex)) return true;
 		}
 	}
 	// DDX
-	else if (UMaterialExpressionDDX* DDX = Cast<UMaterialExpressionDDX>(TargetExpr))
+	else if (ExpressionIsA(TargetExpr, TEXT("MaterialExpressionDDX")))
 	{
 		if (InputName.Equals(TEXT("Value"), ESearchCase::IgnoreCase) || InputName.Equals(TEXT("Input"), ESearchCase::IgnoreCase))
-		{ DDX->Value.Expression = SourceExpr; DDX->Value.OutputIndex = OutputIndex; return true; }
+		{
+			if (SetReflectedExpressionInput(TargetExpr, TEXT("Value"), SourceExpr, OutputIndex)) return true;
+		}
 	}
 	// DDY
-	else if (UMaterialExpressionDDY* DDY = Cast<UMaterialExpressionDDY>(TargetExpr))
+	else if (ExpressionIsA(TargetExpr, TEXT("MaterialExpressionDDY")))
 	{
 		if (InputName.Equals(TEXT("Value"), ESearchCase::IgnoreCase) || InputName.Equals(TEXT("Input"), ESearchCase::IgnoreCase))
-		{ DDY->Value.Expression = SourceExpr; DDY->Value.OutputIndex = OutputIndex; return true; }
+		{
+			if (SetReflectedExpressionInput(TargetExpr, TEXT("Value"), SourceExpr, OutputIndex)) return true;
+		}
 	}
 	// Saturate
 	else if (UMaterialExpressionSaturate* Saturate = Cast<UMaterialExpressionSaturate>(TargetExpr))
@@ -930,7 +964,7 @@ bool FConnectToMaterialOutputAction::ConnectToMaterialProperty(UMaterial* Materi
 	int32 OutputIndex, const FString& PropertyName, FString& OutError) const
 {
 	// Get editor-only data for main material outputs
-	UMaterialEditorOnlyData* EditorData = Material->GetEditorOnlyData();
+	auto* EditorData = MCPCompat::GetMaterialInputs(Material);
 	if (!EditorData)
 	{
 		OutError = TEXT("Could not access material editor data");
@@ -1251,8 +1285,8 @@ TSharedPtr<FJsonObject> FCreateMaterialInstanceAction::ExecuteInternal(const TSh
 			FString TempName = FString::Printf(TEXT("%s_TEMP_%d"), *InstanceName, FMath::Rand());
 			ExistingInstance->Rename(*TempName, GetTransientPackage(),
 				REN_DoNotDirty | REN_DontCreateRedirectors | REN_NonTransactional);
-			ExistingInstance->MarkAsGarbage();
-			ExistingPackage->MarkAsGarbage();
+			MCPCompat::MarkGarbage(ExistingInstance);
+			MCPCompat::MarkGarbage(ExistingPackage);
 		}
 	}
 

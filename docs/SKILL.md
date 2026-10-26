@@ -3,7 +3,7 @@ name: unreal-bp
 description: "Use this skill when working with Unreal Engine via MCP, including: blueprint creation, node manipulation, spawning actors, connecting pins, graph operations, viewport control, editor automation, widget UMG, shader/material creation, post-process effects, component setup, variable management, event handling, function calls, or dispatcher setup. Also use when the user mentions blueprint, node, spawn, connect, actor, graph, viewport, editor, widget, shader, material, post-process, designer, or component in relation to Unreal Engine."
 ---
 
-# Unreal Engine 5.7+ Blueprint Node Skill
+# Unreal Engine 4.27 / 5.x Blueprint Node Skill
 
 This skill provides specialized knowledge for working with Unreal Engine Blueprint nodes via **UEBlueprintMCP** - a Model Context Protocol plugin with persistent TCP connection and modular action-based architecture.
 

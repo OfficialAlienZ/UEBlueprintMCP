@@ -1,6 +1,7 @@
 // Copyright (c) 2025 zolnoor. All rights reserved.
 
 #include "MCPContext.h"
+#include "MCPCompat.h"
 #include "MCPCommonUtils.h"
 #include "Engine/Blueprint.h"
 #include "EdGraph/EdGraph.h"
@@ -194,7 +195,7 @@ UMaterial* FMCPEditorContext::GetMaterialByNameOrCurrent(const FString& Material
 	IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
 
 	TArray<FAssetData> AssetList;
-	AssetRegistry.GetAssetsByClass(UMaterial::StaticClass()->GetClassPathName(), AssetList);
+	MCPCompat::GetAssetsByClass(AssetRegistry, UMaterial::StaticClass(), AssetList);
 
 	for (const FAssetData& AssetData : AssetList)
 	{

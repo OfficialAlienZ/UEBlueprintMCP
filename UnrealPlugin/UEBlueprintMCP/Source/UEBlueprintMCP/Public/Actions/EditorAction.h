@@ -5,6 +5,7 @@
 #include "CoreMinimal.h"
 #include "Dom/JsonObject.h"
 #include "../MCPContext.h"
+#include "../MCPCompat.h"
 
 /**
  * FEditorAction
