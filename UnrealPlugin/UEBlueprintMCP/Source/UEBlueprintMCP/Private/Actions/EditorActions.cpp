@@ -13,26 +13,130 @@
 #include "Engine/SpotLight.h"
 #include "Camera/CameraActor.h"
 #include "Kismet/GameplayStatics.h"
+#include "EngineUtils.h"
+#include "Algo/Sort.h"
 #include "FileHelpers.h"
 #include "UObject/SavePackage.h"
 
 
-// Helper to find actor by name
+// Helper to find actor by name (stops at the first match)
 static AActor* FindActorByName(UWorld* World, const FString& ActorName)
 {
 	if (!World) return nullptr;
 
-	TArray<AActor*> AllActors;
-	UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
-
-	for (AActor* Actor : AllActors)
+	for (TActorIterator<AActor> It(World); It; ++It)
 	{
+		AActor* Actor = *It;
 		if (Actor && Actor->GetName() == ActorName)
 		{
 			return Actor;
 		}
 	}
 	return nullptr;
+}
+
+namespace
+{
+	constexpr int32 DefaultActorQueryLimit = 100;
+	constexpr int32 MaxActorQueryLimit = 1000;
+
+	// True if the actor's class, or any parent class, matches ClassFilter (case-insensitive).
+	// Blueprint classes match with or without the "_C" suffix.
+	bool ActorMatchesClass(const AActor* Actor, const FString& ClassFilter)
+	{
+		for (const UClass* Class = Actor->GetClass(); Class; Class = Class->GetSuperClass())
+		{
+			const FString ClassName = Class->GetName();
+			if (ClassName.Equals(ClassFilter, ESearchCase::IgnoreCase))
+			{
+				return true;
+			}
+			if (ClassName.EndsWith(TEXT("_C")) && ClassName.LeftChop(2).Equals(ClassFilter, ESearchCase::IgnoreCase))
+			{
+				return true;
+			}
+		}
+		return false;
+	}
+
+	// Shared by get_actors_in_level and find_actors_by_name.
+	// Filters, sorts by name (stable pagination), then serializes only the requested page.
+	TSharedPtr<FJsonObject> QueryActors(
+		UWorld* World,
+		const FString& NamePattern,
+		const FString& ClassFilter,
+		int32 Limit,
+		int32 Offset,
+		bool bIncludeTransform,
+		bool bSummaryOnly)
+	{
+		TArray<AActor*> Matches;
+		TMap<FString, int32> ClassCounts;
+
+		for (TActorIterator<AActor> It(World); It; ++It)
+		{
+			AActor* Actor = *It;
+			if (!Actor) continue;
+			if (!NamePattern.IsEmpty() && !Actor->GetName().Contains(NamePattern)) continue;
+			if (!ClassFilter.IsEmpty() && !ActorMatchesClass(Actor, ClassFilter)) continue;
+
+			if (bSummaryOnly)
+			{
+				ClassCounts.FindOrAdd(Actor->GetClass()->GetName())++;
+			}
+			Matches.Add(Actor);
+		}
+
+		TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+		Result->SetNumberField(TEXT("total_count"), Matches.Num());
+
+		if (bSummaryOnly)
+		{
+			ClassCounts.ValueSort([](int32 A, int32 B) { return A > B; });
+			TArray<TSharedPtr<FJsonValue>> CountArray;
+			for (const TPair<FString, int32>& Pair : ClassCounts)
+			{
+				TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+				Entry->SetStringField(TEXT("class"), Pair.Key);
+				Entry->SetNumberField(TEXT("count"), Pair.Value);
+				CountArray.Add(MakeShared<FJsonValueObject>(Entry));
+			}
+			Result->SetArrayField(TEXT("class_counts"), CountArray);
+			return Result;
+		}
+
+		Algo::Sort(Matches, [](const AActor* A, const AActor* B)
+		{
+			return A->GetName().Compare(B->GetName()) < 0;
+		});
+
+		const int32 Start = FMath::Min(Offset, Matches.Num());
+		const int32 End = FMath::Min(Start + Limit, Matches.Num());
+
+		TArray<TSharedPtr<FJsonValue>> ActorArray;
+		for (int32 i = Start; i < End; ++i)
+		{
+			AActor* Actor = Matches[i];
+			if (bIncludeTransform)
+			{
+				ActorArray.Add(FMCPCommonUtils::ActorToJsonValue(Actor));
+			}
+			else
+			{
+				TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+				Entry->SetStringField(TEXT("name"), Actor->GetName());
+				Entry->SetStringField(TEXT("class"), Actor->GetClass()->GetName());
+				ActorArray.Add(MakeShared<FJsonValueObject>(Entry));
+			}
+		}
+
+		Result->SetArrayField(TEXT("actors"), ActorArray);
+		Result->SetNumberField(TEXT("returned_count"), ActorArray.Num());
+		Result->SetNumberField(TEXT("offset"), Start);
+		Result->SetNumberField(TEXT("limit"), Limit);
+		Result->SetBoolField(TEXT("truncated"), End < Matches.Num());
+		return Result;
+	}
 }
 
 
@@ -48,21 +152,17 @@ TSharedPtr<FJsonObject> FGetActorsInLevelAction::ExecuteInternal(const TSharedPt
 		return CreateErrorResponse(TEXT("No editor world available"), TEXT("no_world"));
 	}
 
-	TArray<AActor*> AllActors;
-	UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+	const int32 Limit = FMath::Clamp((int32)GetOptionalNumber(Params, TEXT("limit"), DefaultActorQueryLimit), 1, MaxActorQueryLimit);
+	const int32 Offset = FMath::Max(0, (int32)GetOptionalNumber(Params, TEXT("offset"), 0));
 
-	TArray<TSharedPtr<FJsonValue>> ActorArray;
-	for (AActor* Actor : AllActors)
-	{
-		if (Actor)
-		{
-			ActorArray.Add(FMCPCommonUtils::ActorToJsonValue(Actor));
-		}
-	}
-
-	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-	Result->SetArrayField(TEXT("actors"), ActorArray);
-	return CreateSuccessResponse(Result);
+	return CreateSuccessResponse(QueryActors(
+		World,
+		FString(),
+		GetOptionalString(Params, TEXT("class_filter")),
+		Limit,
+		Offset,
+		GetOptionalBool(Params, TEXT("include_transform"), false),
+		GetOptionalBool(Params, TEXT("summary_only"), false)));
 }
 
 
@@ -87,21 +187,17 @@ TSharedPtr<FJsonObject> FFindActorsByNameAction::ExecuteInternal(const TSharedPt
 		return CreateErrorResponse(TEXT("No editor world available"), TEXT("no_world"));
 	}
 
-	TArray<AActor*> AllActors;
-	UGameplayStatics::GetAllActorsOfClass(World, AActor::StaticClass(), AllActors);
+	const int32 Limit = FMath::Clamp((int32)GetOptionalNumber(Params, TEXT("limit"), DefaultActorQueryLimit), 1, MaxActorQueryLimit);
+	const int32 Offset = FMath::Max(0, (int32)GetOptionalNumber(Params, TEXT("offset"), 0));
 
-	TArray<TSharedPtr<FJsonValue>> MatchingActors;
-	for (AActor* Actor : AllActors)
-	{
-		if (Actor && Actor->GetName().Contains(Pattern))
-		{
-			MatchingActors.Add(FMCPCommonUtils::ActorToJsonValue(Actor));
-		}
-	}
-
-	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-	Result->SetArrayField(TEXT("actors"), MatchingActors);
-	return CreateSuccessResponse(Result);
+	return CreateSuccessResponse(QueryActors(
+		World,
+		Pattern,
+		GetOptionalString(Params, TEXT("class_filter")),
+		Limit,
+		Offset,
+		GetOptionalBool(Params, TEXT("include_transform"), false),
+		GetOptionalBool(Params, TEXT("summary_only"), false)));
 }
 
 

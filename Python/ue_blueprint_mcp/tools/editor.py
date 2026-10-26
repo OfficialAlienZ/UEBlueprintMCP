@@ -30,16 +30,36 @@ def get_tools() -> list[Tool]:
         # Level actors
         Tool(
             name="get_actors_in_level",
-            description="Get a list of all actors in the current level.",
-            inputSchema={"type": "object", "properties": {}}
-        ),
-        Tool(
-            name="find_actors_by_name",
-            description="Find actors by name pattern.",
+            description=(
+                "List actors in the current level (paginated, sorted by name). "
+                "Returns name and class only by default. On large levels, call with "
+                "summary_only=true first to see actor counts per class, then narrow "
+                "with class_filter. Response includes total_count and truncated; "
+                "use offset to fetch further pages."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "pattern": {"type": "string", "description": "Name pattern to search for"}
+                    "class_filter": {"type": "string", "description": "Only actors of this class or a subclass (e.g. StaticMeshActor, PointLight, BP_Enemy)"},
+                    "limit": {"type": "integer", "description": "Max actors to return (default 100, max 1000)"},
+                    "offset": {"type": "integer", "description": "Number of matching actors to skip (default 0)"},
+                    "include_transform": {"type": "boolean", "description": "Include location/rotation/scale (default false)"},
+                    "summary_only": {"type": "boolean", "description": "Return only per-class actor counts (default false)"}
+                }
+            }
+        ),
+        Tool(
+            name="find_actors_by_name",
+            description="Find actors by name pattern (paginated, sorted by name). Supports the same filtering and paging options as get_actors_in_level.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "pattern": {"type": "string", "description": "Name pattern to search for"},
+                    "class_filter": {"type": "string", "description": "Only actors of this class or a subclass"},
+                    "limit": {"type": "integer", "description": "Max actors to return (default 100, max 1000)"},
+                    "offset": {"type": "integer", "description": "Number of matching actors to skip (default 0)"},
+                    "include_transform": {"type": "boolean", "description": "Include location/rotation/scale (default false)"},
+                    "summary_only": {"type": "boolean", "description": "Return only per-class actor counts (default false)"}
                 },
                 "required": ["pattern"]
             }
