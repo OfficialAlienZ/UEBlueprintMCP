@@ -17,6 +17,12 @@ from enum import Enum
 
 logger = logging.getLogger(__name__)
 
+# Commands that legitimately take long (compile, save). The plugin allows these 120s
+# on the game thread (see GetCommandTimeoutSeconds in MCPServer.cpp); the client waits
+# a few seconds longer so the plugin's own timeout error arrives first.
+LONG_RUNNING_COMMANDS = {"compile_blueprint", "compile_material", "save_all"}
+LONG_RUNNING_TIMEOUT = 125.0
+
 
 class ConnectionState(Enum):
     """Connection lifecycle states."""
@@ -187,7 +193,8 @@ class PersistentUnrealConnection:
                 params_preview = json.dumps(params)[:200] if params else "none"
                 logger.debug(f">>> Sending command '{command_type}' with params: {params_preview}")
 
-                # Send command
+                # Send command (long-running commands get a longer socket timeout)
+                self._socket.settimeout(self._timeout_for(command_type))
                 self._send_raw(command)
 
                 # Receive response
@@ -270,10 +277,19 @@ class PersistentUnrealConnection:
                     )
 
             except socket.timeout:
+                # Do NOT retry: the command may still be running in the editor, and a retry
+                # could apply it twice. Drop the socket so a late response can never be
+                # mistaken for the reply to the next command.
                 logger.warning(f"Command '{command_type}' timed out")
+                self._state = ConnectionState.ERROR
+                self._cleanup_socket()
                 return CommandResult(
                     success=False,
-                    error=f"Command '{command_type}' timed out after {self.config.timeout}s",
+                    error=(
+                        f"[timeout] Command '{command_type}' timed out after "
+                        f"{self._timeout_for(command_type)}s. It may still be running in the editor; "
+                        f"check the editor state before retrying."
+                    ),
                     recoverable=True
                 )
             except (socket.error, BrokenPipeError, ConnectionResetError) as e:
@@ -304,6 +320,12 @@ class PersistentUnrealConnection:
             CommandResult with context data (current blueprint, graph, etc.)
         """
         return self.send_command("get_context")
+
+    def _timeout_for(self, command_type: str) -> float:
+        """Socket timeout for a command."""
+        if command_type in LONG_RUNNING_COMMANDS:
+            return max(self.config.timeout, LONG_RUNNING_TIMEOUT)
+        return self.config.timeout
 
     def _send_raw(self, data: dict):
         """Send raw JSON data over socket."""
@@ -360,7 +382,7 @@ class PersistentUnrealConnection:
                     return None  # Connection closed
                 data.extend(chunk)
             except socket.timeout:
-                return None
+                raise  # Let send_command handle it; returning None would trigger a retry
             except socket.error:
                 return None
 

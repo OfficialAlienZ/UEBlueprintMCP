@@ -3,6 +3,9 @@
 #include "MCPServer.h"
 #include "MCPBridge.h"
 #include "Async/Async.h"
+#include "Async/Future.h"
+#include "Misc/ScopeLock.h"
+#include "UObject/WeakObjectPtrTemplates.h"
 #include "Serialization/JsonSerializer.h"
 #include "Serialization/JsonWriter.h"
 #include "Dom/JsonObject.h"
@@ -378,68 +381,130 @@ void FMCPServer::HandleClose(FSocket* ClientSocket)
 FString FMCPServer::HandleGetContext()
 {
 	// Execute on game thread to safely access context
-	FString Result;
-
-	FEvent* DoneEvent = FPlatformProcess::GetSynchEventFromPool(false);
-
-	AsyncTask(ENamedThreads::GameThread, [this, &Result, DoneEvent]()
+	return RunOnGameThread(TEXT("get_context"), ContextTimeoutSeconds, [](UMCPBridge* InBridge) -> FString
 	{
-		if (Bridge)
+		TSharedPtr<FJsonObject> ContextJson = InBridge->GetContext().ToJson();
+
+		TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
+		Response->SetStringField(TEXT("status"), TEXT("success"));
+		Response->SetObjectField(TEXT("result"), ContextJson);
+
+		FString ResponseStr;
+		TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&ResponseStr);
+		FJsonSerializer::Serialize(Response.ToSharedRef(), Writer);
+		return ResponseStr;
+	});
+}
+
+namespace
+{
+	/** Shared state between the server thread and a queued game-thread task. */
+	struct FGameThreadCall
+	{
+		FCriticalSection Lock;
+		int32 State = 0;  // 0 = queued, 1 = running, 2 = cancelled (timed out before it started)
+		TPromise<FString> Promise;
+	};
+
+	/** Commands that legitimately take long (compile, save). Keep in sync with the Python client. */
+	double GetCommandTimeoutSeconds(const FString& CommandType)
+	{
+		static const TSet<FString> LongRunning = {
+			TEXT("compile_blueprint"),
+			TEXT("compile_material"),
+			TEXT("save_all")
+		};
+		return LongRunning.Contains(CommandType) ? 120.0 : 25.0;
+	}
+}
+
+FString FMCPServer::RunOnGameThread(const FString& Label, double TimeoutSeconds, TFunction<FString(UMCPBridge*)> Work)
+{
+	TSharedRef<FGameThreadCall, ESPMode::ThreadSafe> Call = MakeShared<FGameThreadCall, ESPMode::ThreadSafe>();
+	TFuture<FString> Future = Call->Promise.GetFuture();
+	TWeakObjectPtr<UMCPBridge> WeakBridge(Bridge);
+
+	// Everything the task touches is captured by value / shared, so it stays valid
+	// even if this function has already returned because of a timeout.
+	AsyncTask(ENamedThreads::GameThread, [Call, WeakBridge, Work]()
+	{
 		{
-			TSharedPtr<FJsonObject> ContextJson = Bridge->GetContext().ToJson();
+			FScopeLock Lock(&Call->Lock);
+			if (Call->State == 2)
+			{
+				return;  // Caller already timed out; do not run a stale command.
+			}
+			Call->State = 1;
+		}
 
-			TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
-			Response->SetStringField(TEXT("status"), TEXT("success"));
-			Response->SetObjectField(TEXT("result"), ContextJson);
-
-			FString ResponseStr;
-			TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&ResponseStr);
-			FJsonSerializer::Serialize(Response.ToSharedRef(), Writer);
-			Result = ResponseStr;
+		FString Result;
+		if (UMCPBridge* LiveBridge = WeakBridge.Get())
+		{
+			Result = Work(LiveBridge);
 		}
 		else
 		{
 			Result = TEXT("{\"status\":\"error\",\"error\":\"Bridge not available\"}");
 		}
-
-		DoneEvent->Trigger();
+		Call->Promise.SetValue(Result);
 	});
 
-	DoneEvent->Wait();
-	FPlatformProcess::ReturnSynchEventToPool(DoneEvent);
+	if (Future.WaitFor(FTimespan::FromSeconds(TimeoutSeconds)))
+	{
+		return Future.Get();
+	}
 
-	return Result;
+	bool bStarted = false;
+	{
+		FScopeLock Lock(&Call->Lock);
+		bStarted = (Call->State == 1);
+		if (!bStarted)
+		{
+			Call->State = 2;
+		}
+	}
+
+	// It may have finished in the instant between the wait expiring and taking the lock.
+	if (bStarted && Future.IsReady())
+	{
+		return Future.Get();
+	}
+
+	FString Message;
+	if (bStarted)
+	{
+		UE_LOG(LogTemp, Warning, TEXT("UEBlueprintMCP: Command '%s' still running after %.0fs, reporting timeout"), *Label, TimeoutSeconds);
+		Message = FString::Printf(TEXT("Command '%s' did not finish within %.0fs. It is still running in the editor and may complete later. Check the editor state before retrying."), *Label, TimeoutSeconds);
+	}
+	else
+	{
+		UE_LOG(LogTemp, Warning, TEXT("UEBlueprintMCP: Command '%s' never started within %.0fs (game thread busy), cancelled"), *Label, TimeoutSeconds);
+		Message = FString::Printf(TEXT("Command '%s' was not started within %.0fs because the editor was busy (modal dialog, compile, or asset loading). It was cancelled and not executed."), *Label, TimeoutSeconds);
+	}
+
+	TSharedPtr<FJsonObject> Response = MakeShared<FJsonObject>();
+	Response->SetBoolField(TEXT("success"), false);
+	Response->SetStringField(TEXT("error"), Message);
+	Response->SetStringField(TEXT("error_type"), TEXT("timeout"));
+	Response->SetBoolField(TEXT("command_started"), bStarted);
+
+	FString ResponseStr;
+	TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&ResponseStr);
+	FJsonSerializer::Serialize(Response.ToSharedRef(), Writer);
+	return ResponseStr;
 }
 
 FString FMCPServer::ExecuteOnGameThread(const FString& CommandType, TSharedPtr<FJsonObject> Params)
 {
-	FString Result;
-	FEvent* DoneEvent = FPlatformProcess::GetSynchEventFromPool(false);
-
-	AsyncTask(ENamedThreads::GameThread, [this, &CommandType, Params, &Result, DoneEvent]()
+	return RunOnGameThread(CommandType, GetCommandTimeoutSeconds(CommandType), [CommandType, Params](UMCPBridge* InBridge) -> FString
 	{
-		if (Bridge)
-		{
-			// Execute with crash protection
-			TSharedPtr<FJsonObject> Response = Bridge->ExecuteCommandSafe(CommandType, Params);
+		// Execute with crash protection
+		TSharedPtr<FJsonObject> Response = InBridge->ExecuteCommandSafe(CommandType, Params);
 
-			// Serialize response
-			FString ResponseStr;
-			TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&ResponseStr);
-			FJsonSerializer::Serialize(Response.ToSharedRef(), Writer);
-			Result = ResponseStr;
-		}
-		else
-		{
-			Result = TEXT("{\"status\":\"error\",\"error\":\"Bridge not available\"}");
-		}
-
-		DoneEvent->Trigger();
+		// Serialize response
+		FString ResponseStr;
+		TSharedRef<TJsonWriter<>> Writer = TJsonWriterFactory<>::Create(&ResponseStr);
+		FJsonSerializer::Serialize(Response.ToSharedRef(), Writer);
+		return ResponseStr;
 	});
-
-	// Wait for game thread to complete
-	DoneEvent->Wait();
-	FPlatformProcess::ReturnSynchEventToPool(DoneEvent);
-
-	return Result;
 }

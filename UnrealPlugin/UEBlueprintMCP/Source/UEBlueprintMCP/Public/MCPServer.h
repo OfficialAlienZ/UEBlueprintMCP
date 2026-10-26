@@ -66,6 +66,14 @@ private:
 	/** Execute command on game thread and get response */
 	FString ExecuteOnGameThread(const FString& CommandType, TSharedPtr<FJsonObject> Params);
 
+	/**
+	 * Run Work on the game thread and wait up to TimeoutSeconds.
+	 * On timeout returns an error_type=timeout JSON response. If the task has not started yet
+	 * it is cancelled so it will not run later; if it is already running it cannot be
+	 * interrupted and the response says so.
+	 */
+	FString RunOnGameThread(const FString& Label, double TimeoutSeconds, TFunction<FString(UMCPBridge*)> Work);
+
 	/** The bridge that owns this server */
 	UMCPBridge* Bridge;
 
@@ -94,6 +102,9 @@ private:
 #else
 	static constexpr float ConnectionTimeout = 60.0f;
 #endif
+
+	/** Game-thread timeout for get_context, in seconds */
+	static constexpr double ContextTimeoutSeconds = 10.0;
 
 	/** Receive buffer size */
 	static constexpr int32 RecvBufferSize = 1024 * 1024;  // 1MB
