@@ -479,7 +479,7 @@ void FAddMaterialExpressionAction::SetExpressionProperties(UMaterialExpression* 
 
 	for (const auto& Pair : Properties->Values)
 	{
-		const FString& PropName = Pair.Key;
+		const FString PropName(Pair.Key.ToView());
 		const TSharedPtr<FJsonValue>& PropValue = Pair.Value;
 
 		// Handle specific expression types and their properties

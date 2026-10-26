@@ -81,6 +81,9 @@ private:
 	/** Flag to signal thread to stop */
 	TAtomic<bool> bShouldStop;
 
+	/** One-shot guard: Stop() must execute exactly once (re-entrancy / double delete protection) */
+	TAtomic<bool> bStopCalled{false};
+
 	/** Flag indicating if server is running */
 	TAtomic<bool> bIsRunning;
 

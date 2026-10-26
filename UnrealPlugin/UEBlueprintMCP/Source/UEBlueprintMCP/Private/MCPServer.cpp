@@ -83,6 +83,15 @@ bool FMCPServer::Start()
 
 void FMCPServer::Stop()
 {
+	// One-shot, re-entrancy-safe guard. Without this, Stop() can be entered
+	// twice (Deinitialize + ~FMCPServer, or concurrently during engine
+	// shutdown), causing a double-delete of Thread and a recursive
+	// Stop()->WaitForCompletion() loop that crashes with STACK_OVERFLOW.
+	if (bStopCalled.Exchange(true))
+	{
+		return;
+	}
+
 	bShouldStop = true;
 
 	if (ListenerSocket)
@@ -92,7 +101,12 @@ void FMCPServer::Stop()
 
 	if (Thread)
 	{
-		Thread->WaitForCompletion();
+		// Never wait on our own thread - would deadlock if Stop()
+		// is ever called from the server worker thread itself.
+		if (FRunnableThread::GetRunnableThread() != Thread)
+		{
+			Thread->WaitForCompletion();
+		}
 		delete Thread;
 		Thread = nullptr;
 	}
