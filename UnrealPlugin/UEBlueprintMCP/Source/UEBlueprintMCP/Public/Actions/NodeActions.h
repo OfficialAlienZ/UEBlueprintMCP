@@ -96,6 +96,7 @@ protected:
 };
 
 
+#if MCP_WITH_ENHANCED_INPUT
 /** Add an Enhanced Input action event node */
 class UEBLUEPRINTMCP_API FAddEnhancedInputActionNodeAction : public FBlueprintNodeAction
 {
@@ -105,6 +106,7 @@ protected:
 	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
 	virtual FString GetActionName() const override { return TEXT("add_enhanced_input_action_node"); }
 };
+#endif // MCP_WITH_ENHANCED_INPUT
 
 
 /** Add a custom event node */

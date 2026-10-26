@@ -87,7 +87,7 @@ All editor operations flow through `FEditorAction` subclasses that provide:
 
 ## Requirements
 
-- Unreal Engine 4.27 or 5.x (4.27 requires the experimental Enhanced Input plugin; version differences live in `MCPCompat.h`)
+- Unreal Engine 4.27 or 5.x. Enhanced Input is optional: enabled automatically on UE 5.1+ (or when your project enables the plugin), disabled otherwise. Without it, only the legacy input commands are available (`MCP_WITH_ENHANCED_INPUT`, see `UEBlueprintMCP.Build.cs`; version differences live in `MCPCompat.h`)
 - Python 3.10+
 - Visual Studio 2022 (Windows) or Xcode (macOS) for plugin builds
 

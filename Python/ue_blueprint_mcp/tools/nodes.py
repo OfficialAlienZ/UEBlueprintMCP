@@ -76,7 +76,7 @@ def get_tools() -> list[Tool]:
         ),
         Tool(
             name="add_enhanced_input_action_node",
-            description="Add an Enhanced Input Action event node with Started/Triggered/Completed exec pins.",
+            description="Add an Enhanced Input Action event node with Started/Triggered/Completed exec pins. Requires Enhanced Input to be enabled in the plugin build.",
             inputSchema={
                 "type": "object",
                 "properties": {

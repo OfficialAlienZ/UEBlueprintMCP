@@ -23,7 +23,10 @@
 #include "K2Node_CallDelegate.h"
 #include "K2Node_AddDelegate.h"
 #include "K2Node_SpawnActorFromClass.h"
+#if MCP_WITH_ENHANCED_INPUT
 #include "K2Node_EnhancedInputAction.h"
+#include "InputAction.h"
+#endif
 #include "K2Node_GetSubsystem.h"
 #include "K2Node_MacroInstance.h"
 #include "Kismet2/BlueprintEditorUtils.h"
@@ -31,8 +34,6 @@
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "Kismet/KismetSystemLibrary.h"
-#include "EnhancedInputSubsystems.h"
-#include "InputAction.h"
 
 // ============================================================================
 // Graph Operations (connect, find, delete, inspect)
@@ -453,6 +454,7 @@ TSharedPtr<FJsonObject> FAddBlueprintInputActionNodeAction::ExecuteInternal(cons
 }
 
 
+#if MCP_WITH_ENHANCED_INPUT
 bool FAddEnhancedInputActionNodeAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
 {
 	FString ActionName;
@@ -490,6 +492,7 @@ TSharedPtr<FJsonObject> FAddEnhancedInputActionNodeAction::ExecuteInternal(const
 	ResultData->SetStringField(TEXT("node_id"), ActionNode->NodeGuid.ToString());
 	return CreateSuccessResponse(ResultData);
 }
+#endif // MCP_WITH_ENHANCED_INPUT
 
 
 bool FAddBlueprintCustomEventAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
@@ -829,7 +832,8 @@ TSharedPtr<FJsonObject> FAddBlueprintFunctionNodeAction::ExecuteInternal(const T
 	}
 	else if (TargetLower.Contains(TEXT("enhancedinputlocalplayersubsystem")) || TargetLower.Contains(TEXT("inputsubsystem")))
 	{
-		TargetClass = UEnhancedInputLocalPlayerSubsystem::StaticClass();
+		// Resolved by name so it works whether or not the EnhancedInput module is linked.
+		TargetClass = LoadClass<UObject>(nullptr, TEXT("/Script/EnhancedInput.EnhancedInputLocalPlayerSubsystem"));
 	}
 
 	// If not a known class, try module paths

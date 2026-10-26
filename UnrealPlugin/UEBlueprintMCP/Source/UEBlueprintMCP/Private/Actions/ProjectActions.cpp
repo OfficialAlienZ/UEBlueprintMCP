@@ -3,11 +3,13 @@
 #include "Actions/ProjectActions.h"
 #include "MCPCommonUtils.h"
 #include "GameFramework/InputSettings.h"
+#if MCP_WITH_ENHANCED_INPUT
 #include "InputAction.h"
 #include "InputMappingContext.h"
 #include "InputModifiers.h"
 #include "InputActionValue.h"
 #include "EnhancedActionKeyMapping.h"
+#endif
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "UObject/SavePackage.h"
 #include "EditorAssetLibrary.h"
@@ -103,6 +105,8 @@ TSharedPtr<FJsonObject> FCreateInputMappingAction::ExecuteInternal(const TShared
 
 	return ResultObj;
 }
+
+#if MCP_WITH_ENHANCED_INPUT
 
 // =============================================================================
 // FCreateInputActionAction - Enhanced Input Action asset
@@ -380,3 +384,5 @@ TSharedPtr<FJsonObject> FAddKeyMappingToContextAction::ExecuteInternal(const TSh
 	ResultObj->SetStringField(TEXT("key"), KeyStr);
 	return ResultObj;
 }
+
+#endif // MCP_WITH_ENHANCED_INPUT

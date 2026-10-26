@@ -23,10 +23,6 @@
 	],
 	"Plugins": [
 		{
-			"Name": "EnhancedInput",
-			"Enabled": true
-		},
-		{
 			"Name": "EditorScriptingUtilities",
 			"Enabled": true
 		}

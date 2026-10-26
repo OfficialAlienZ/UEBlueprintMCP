@@ -107,7 +107,9 @@ void UMCPBridge::RegisterActions()
 	// =========================================================================
 	ActionHandlers.Add(TEXT("add_blueprint_event_node"), MakeShared<FAddBlueprintEventNodeAction>());
 	ActionHandlers.Add(TEXT("add_blueprint_input_action_node"), MakeShared<FAddBlueprintInputActionNodeAction>());
+#if MCP_WITH_ENHANCED_INPUT
 	ActionHandlers.Add(TEXT("add_enhanced_input_action_node"), MakeShared<FAddEnhancedInputActionNodeAction>());
+#endif
 	ActionHandlers.Add(TEXT("add_blueprint_custom_event"), MakeShared<FAddBlueprintCustomEventAction>());
 
 	// =========================================================================
@@ -160,9 +162,11 @@ void UMCPBridge::RegisterActions()
 	// Project Actions (Input Mappings, Enhanced Input)
 	// =========================================================================
 	ActionHandlers.Add(TEXT("create_input_mapping"), MakeShared<FCreateInputMappingAction>());
+#if MCP_WITH_ENHANCED_INPUT
 	ActionHandlers.Add(TEXT("create_input_action"), MakeShared<FCreateInputActionAction>());
 	ActionHandlers.Add(TEXT("create_input_mapping_context"), MakeShared<FCreateInputMappingContextAction>());
 	ActionHandlers.Add(TEXT("add_key_mapping_to_context"), MakeShared<FAddKeyMappingToContextAction>());
+#endif
 
 	// =========================================================================
 	// UMG Actions (Widget Blueprints)

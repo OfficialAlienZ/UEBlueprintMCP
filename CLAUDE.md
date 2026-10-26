@@ -289,7 +289,7 @@ UE4 differences handled:
 - Pins: `PC_Float` instead of `PC_Real` + `PC_Double`
 - `SetOverlayMaterial` does not exist (ignored with a warning)
 - Classes not exported from their modules (linker errors on `StaticClass()`): `UMaterialExpressionSceneTexture/SceneDepth/ScreenPosition/DDX/DDY`, `UK2Node_GetSubsystemFromPC`. Resolve by name with `FindObject<UClass>` and use reflection / the exported base class.
-- Enhanced Input is an experimental engine plugin in 4.27 (declared in the `.uplugin`)
+- Enhanced Input is optional (`MCP_WITH_ENHANCED_INPUT`, set in `UEBlueprintMCP.Build.cs`). It is OFF by default on 4.27 and on only if the project's `.uproject` enables the `EnhancedInput` plugin; ON by default on UE 5.1+. Override with env var `UEBLUEPRINTMCP_ENHANCED_INPUT=0|1`. Enhanced Input commands (`create_input_action`, `create_input_mapping_context`, `add_key_mapping_to_context`, `add_enhanced_input_action_node`) are only registered when enabled; legacy input commands always work. The plugin is not declared in the `.uplugin`.
 - `.uplugin` uses no platform allow list (`WhitelistPlatforms` in 4.27 vs `PlatformAllowList` in 5.x)
 
 ## UE 5.7 Compatibility Notes

@@ -46,7 +46,7 @@ def get_tools() -> list[Tool]:
         # Enhanced Input System
         Tool(
             name="create_input_action",
-            description="Create an Enhanced Input Action asset.",
+            description="Create an Enhanced Input Action asset. Requires Enhanced Input to be enabled in the plugin build.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -59,7 +59,7 @@ def get_tools() -> list[Tool]:
         ),
         Tool(
             name="create_input_mapping_context",
-            description="Create an Enhanced Input Mapping Context asset.",
+            description="Create an Enhanced Input Mapping Context asset. Requires Enhanced Input to be enabled in the plugin build.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -71,7 +71,7 @@ def get_tools() -> list[Tool]:
         ),
         Tool(
             name="add_key_mapping_to_context",
-            description="Add a key mapping to an Input Mapping Context with optional modifiers.",
+            description="Add a key mapping to an Input Mapping Context with optional modifiers. Requires Enhanced Input to be enabled in the plugin build.",
             inputSchema={
                 "type": "object",
                 "properties": {

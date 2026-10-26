@@ -24,6 +24,11 @@
 #define MCP_UE5 0
 #endif
 
+// Defined by UEBlueprintMCP.Build.cs. 1 when the EnhancedInput module is linked.
+#ifndef MCP_WITH_ENHANCED_INPUT
+#define MCP_WITH_ENHANCED_INPUT 0
+#endif
+
 namespace MCPCompat
 {
 	/** MarkAsGarbage (UE5) / MarkPendingKill (UE4). */

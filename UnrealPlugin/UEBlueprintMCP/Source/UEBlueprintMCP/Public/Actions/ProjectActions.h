@@ -18,6 +18,8 @@ protected:
 	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
 };
 
+#if MCP_WITH_ENHANCED_INPUT
+
 /**
  * Create Enhanced Input Action asset
  */
@@ -56,3 +58,5 @@ protected:
 	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
 	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
 };
+
+#endif // MCP_WITH_ENHANCED_INPUT
