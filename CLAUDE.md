@@ -292,6 +292,10 @@ UE4 differences handled:
 - Enhanced Input is optional (`MCP_WITH_ENHANCED_INPUT`, set in `UEBlueprintMCP.Build.cs`). It is OFF by default on 4.27 and on only if the project's `.uproject` enables the `EnhancedInput` plugin; ON by default on UE 5.1+. Override with env var `UEBLUEPRINTMCP_ENHANCED_INPUT=0|1`. Enhanced Input commands (`create_input_action`, `create_input_mapping_context`, `add_key_mapping_to_context`, `add_enhanced_input_action_node`) are only registered when enabled; legacy input commands always work. The plugin is not declared in the `.uplugin`.
 - `.uplugin` uses no platform allow list (`WhitelistPlatforms` in 4.27 vs `PlatformAllowList` in 5.x)
 
+### UMG single-child containers (UE4 editor bug)
+
+In the UE4 Designer, pasting into a single-child container (Button, Border, SizeBox, ScaleBox...) that already has a child asks to replace it, but answering "No" still deletes the existing child. Current MCP commands are not affected (they only add to new, empty widgets or the multi-child root Canvas Panel). In any new UMG action, check `CanAddMoreChildren()` / `GetChildrenCount()` before `AddChild` and return an error instead of replacing content.
+
 ## UE 5.7 Compatibility Notes
 
 Changes made for UE 5.7 compatibility:

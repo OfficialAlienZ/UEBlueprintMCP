@@ -422,6 +422,10 @@ CreateErrorResponse(TEXT("Error message"))
 
 The MCP `bind_widget_event` command creates a `UK2Node_ComponentBoundEvent` node in the widget's event graph. The widget component must be marked as a variable ("Is Variable" = true in designer) for the binding to resolve correctly.
 
+### Warning: UE4 UMG single-child containers (editor bug)
+
+In the UE4 Designer, pasting a widget onto a single-child container (Button, Border, SizeBox, ScaleBox, etc.) that already has a child prompts "replace existing content?". Answering **No still deletes the existing child**. This is an engine bug, not an MCP bug. The MCP only calls `AddChild` on freshly created (empty) widgets or on the multi-child root Canvas Panel, so it is not affected. When extending UMG commands, never add a child to a single-child container that may already be occupied without checking `UPanelWidget::CanAddMoreChildren()`/`GetChildrenCount()` first, and tell users not to copy/paste into occupied single-child slots in the editor (drag in or use the hierarchy instead), since a wrongly-trashed child is only recoverable via undo.
+
 ## Material Expression Types
 
 ### Available Expression Classes
