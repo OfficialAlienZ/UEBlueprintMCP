@@ -2,6 +2,7 @@
 
 #include "Actions/EditorActions.h"
 #include "MCPCommonUtils.h"
+#include "MCPInspectionUtils.h"
 #include "Editor.h"
 #include "EditorViewportClient.h"
 #include "LevelEditorViewport.h"
@@ -59,6 +60,15 @@ namespace
 		return false;
 	}
 
+	void MergeJsonFields(const TSharedPtr<FJsonObject>& Target, const TSharedPtr<FJsonObject>& Source)
+	{
+		if (!Target.IsValid() || !Source.IsValid()) return;
+		for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : Source->Values)
+		{
+			Target->SetField(Pair.Key, Pair.Value);
+		}
+	}
+
 	// Shared by get_actors_in_level and find_actors_by_name.
 	// Filters, sorts by name (stable pagination), then serializes only the requested page.
 	TSharedPtr<FJsonObject> QueryActors(
@@ -68,7 +78,8 @@ namespace
 		int32 Limit,
 		int32 Offset,
 		bool bIncludeTransform,
-		bool bSummaryOnly)
+		bool bSummaryOnly,
+		bool bIncludeDetails)
 	{
 		TArray<AActor*> Matches;
 		TMap<FString, int32> ClassCounts;
@@ -117,7 +128,13 @@ namespace
 		for (int32 i = Start; i < End; ++i)
 		{
 			AActor* Actor = Matches[i];
-			if (bIncludeTransform)
+			if (bIncludeDetails)
+			{
+				TSharedPtr<FJsonObject> Entry = FMCPCommonUtils::ActorToJsonObject(Actor);
+				MergeJsonFields(Entry, FMCPInspectionUtils::ActorDetailsToJson(Actor, false));
+				ActorArray.Add(MakeShared<FJsonValueObject>(Entry));
+			}
+			else if (bIncludeTransform)
 			{
 				ActorArray.Add(FMCPCommonUtils::ActorToJsonValue(Actor));
 			}
@@ -162,7 +179,8 @@ TSharedPtr<FJsonObject> FGetActorsInLevelAction::ExecuteInternal(const TSharedPt
 		Limit,
 		Offset,
 		GetOptionalBool(Params, TEXT("include_transform"), false),
-		GetOptionalBool(Params, TEXT("summary_only"), false)));
+		GetOptionalBool(Params, TEXT("summary_only"), false),
+		GetOptionalBool(Params, TEXT("include_details"), false)));
 }
 
 
@@ -197,7 +215,8 @@ TSharedPtr<FJsonObject> FFindActorsByNameAction::ExecuteInternal(const TSharedPt
 		Limit,
 		Offset,
 		GetOptionalBool(Params, TEXT("include_transform"), false),
-		GetOptionalBool(Params, TEXT("summary_only"), false)));
+		GetOptionalBool(Params, TEXT("summary_only"), false),
+		GetOptionalBool(Params, TEXT("include_details"), false)));
 }
 
 
@@ -422,7 +441,9 @@ TSharedPtr<FJsonObject> FGetActorPropertiesAction::ExecuteInternal(const TShared
 		);
 	}
 
-	return CreateSuccessResponse(FMCPCommonUtils::ActorToJsonObject(Actor));
+	TSharedPtr<FJsonObject> Result = FMCPCommonUtils::ActorToJsonObject(Actor);
+	MergeJsonFields(Result, FMCPInspectionUtils::ActorDetailsToJson(Actor, GetOptionalBool(Params, TEXT("include_properties"), true)));
+	return CreateSuccessResponse(Result);
 }
 
 

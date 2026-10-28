@@ -15,7 +15,7 @@
  *   - blueprint_name (optional): Blueprint name or full asset path (defaults to current Blueprint)
  *   - sections (optional): Array of sections to include. Default: all.
  *       parents, interfaces, graphs, variables, functions, macros, dispatchers,
- *       events, components, class_defaults, widgets
+ *       events, components, class_defaults, timelines, widgets
  *   - include_component_properties (optional, default true): Include properties that differ
  *       from the component class defaults (components / inherited components)
  *

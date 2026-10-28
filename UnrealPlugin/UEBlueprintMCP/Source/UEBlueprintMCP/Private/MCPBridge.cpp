@@ -6,6 +6,8 @@
 #include "Actions/BlueprintActions.h"
 #include "Actions/EditorActions.h"
 #include "Actions/InspectionActions.h"
+#include "Actions/AIActions.h"
+#include "Actions/AssetInspectionActions.h"
 #include "Actions/NodeActions.h"
 #include "Actions/ProjectActions.h"
 #include "Actions/UMGActions.h"
@@ -83,6 +85,10 @@ void UMCPBridge::RegisterActions()
 	// Inspection Actions (read-only introspection)
 	// =========================================================================
 	ActionHandlers.Add(TEXT("get_blueprint_info"), MakeShared<FGetBlueprintInfoAction>());
+	ActionHandlers.Add(TEXT("get_behavior_tree_info"), MakeShared<FGetBehaviorTreeInfoAction>());
+	ActionHandlers.Add(TEXT("get_enum_info"), MakeShared<FGetEnumInfoAction>());
+	ActionHandlers.Add(TEXT("get_curve_info"), MakeShared<FGetCurveInfoAction>());
+	ActionHandlers.Add(TEXT("get_data_table_info"), MakeShared<FGetDataTableInfoAction>());
 
 	// =========================================================================
 	// Editor Actions (actors, viewport, save)

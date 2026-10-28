@@ -111,6 +111,16 @@ namespace MCPCompat
 #endif
 	}
 
+	/** Find a loaded native/user enum by short name (e.g. ECollisionChannel). */
+	inline UEnum* FindEnum(const FString& Name)
+	{
+#if MCP_UE5
+		return FindFirstObject<UEnum>(*Name, EFindFirstObjectOptions::NativeFirst);
+#else
+		return FindObject<UEnum>(ANY_PACKAGE, *Name, true);
+#endif
+	}
+
 	/** Add a class to an asset registry filter. */
 	inline void AddFilterClass(FARFilter& Filter, UClass* Class)
 	{

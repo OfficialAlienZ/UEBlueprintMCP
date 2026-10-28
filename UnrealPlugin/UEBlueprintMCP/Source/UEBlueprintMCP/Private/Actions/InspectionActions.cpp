@@ -2,10 +2,15 @@
 
 #include "Actions/InspectionActions.h"
 #include "MCPCommonUtils.h"
+#include "MCPInspectionUtils.h"
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
 #include "Engine/SimpleConstructionScript.h"
 #include "Engine/SCS_Node.h"
+#include "Engine/TimelineTemplate.h"
+#include "Curves/CurveFloat.h"
+#include "Curves/CurveVector.h"
+#include "Curves/CurveLinearColor.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
@@ -32,7 +37,7 @@ namespace
 	{
 		TEXT("parents"), TEXT("interfaces"), TEXT("graphs"), TEXT("variables"), TEXT("functions"),
 		TEXT("macros"), TEXT("dispatchers"), TEXT("events"), TEXT("components"), TEXT("class_defaults"),
-		TEXT("widgets")
+		TEXT("timelines"), TEXT("widgets")
 	};
 
 	typedef TArray<TSharedPtr<FJsonValue>> FJsonArray;
@@ -54,32 +59,113 @@ namespace
 		return Out;
 	}
 
-	/** Editable properties of Object whose value differs from Baseline (name -> exported text). */
-	TSharedPtr<FJsonObject> ChangedProperties(UObject* Object, UObject* Baseline, const UClass* ExcludeOwner)
+	/** Common track fields: name, external curve asset path (if any). */
+	TSharedPtr<FJsonObject> TrackBaseToJson(const FTTTrackBase& Track, const UCurveBase* Curve)
 	{
 		TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
-		if (!Object || !Baseline)
+		Result->SetStringField(TEXT("name"), Track.GetTrackName().ToString());
+		Result->SetBoolField(TEXT("is_external_curve"), Track.bIsExternalCurve);
+		if (Track.bIsExternalCurve && Curve)
 		{
-			return Result;
+			Result->SetStringField(TEXT("curve_asset"), Curve->GetPathName());
 		}
+		if (Curve)
+		{
+			float MinTime = 0.f, MaxTime = 0.f, MinValue = 0.f, MaxValue = 0.f;
+			Curve->GetTimeRange(MinTime, MaxTime);
+			Curve->GetValueRange(MinValue, MaxValue);
+			Result->SetNumberField(TEXT("min_time"), MinTime);
+			Result->SetNumberField(TEXT("max_time"), MaxTime);
+			Result->SetNumberField(TEXT("min_value"), MinValue);
+			Result->SetNumberField(TEXT("max_value"), MaxValue);
+		}
+		return Result;
+	}
 
-		for (TFieldIterator<FProperty> It(Object->GetClass()); It; ++It)
+	TSharedPtr<FJsonObject> TimelineToJson(const UTimelineTemplate* Timeline)
+	{
+		TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+		Result->SetStringField(TEXT("name"), Timeline->GetVariableName().ToString());
+		Result->SetNumberField(TEXT("length"), Timeline->TimelineLength);
+		Result->SetStringField(TEXT("length_mode"), Timeline->LengthMode == TL_LastKeyFrame ? TEXT("LastKeyFrame") : TEXT("TimelineLength"));
+		Result->SetBoolField(TEXT("auto_play"), Timeline->bAutoPlay);
+		Result->SetBoolField(TEXT("loop"), Timeline->bLoop);
+		Result->SetBoolField(TEXT("replicated"), Timeline->bReplicated);
+		Result->SetBoolField(TEXT("ignore_time_dilation"), Timeline->bIgnoreTimeDilation);
+		Result->SetStringField(TEXT("update_function"), Timeline->GetUpdateFunctionName().ToString());
+		Result->SetStringField(TEXT("finished_function"), Timeline->GetFinishedFunctionName().ToString());
+		Result->SetStringField(TEXT("direction_property"), Timeline->GetDirectionPropertyName().ToString());
+
+		FJsonArray FloatTracks;
+		for (const FTTFloatTrack& Track : Timeline->FloatTracks)
 		{
-			const FProperty* Property = *It;
-			if (!Property->HasAnyPropertyFlags(CPF_Edit) || Property->HasAnyPropertyFlags(CPF_Deprecated))
+			TSharedPtr<FJsonObject> Entry = TrackBaseToJson(Track, Track.CurveFloat);
+			Entry->SetStringField(TEXT("property"), Track.GetPropertyName().ToString());
+			if (Track.CurveFloat)
 			{
-				continue;
+				Entry->SetObjectField(TEXT("curve"), FMCPInspectionUtils::RichCurveToJson(Track.CurveFloat->FloatCurve));
 			}
-			if (ExcludeOwner && Property->GetOwnerClass() == ExcludeOwner)
-			{
-				continue;
-			}
-			if (Property->Identical_InContainer(Object, Baseline))
-			{
-				continue;
-			}
-			Result->SetStringField(Property->GetName(), ExportProperty(Property, Object));
+			FloatTracks.Add(AsValue(Entry));
 		}
+		Result->SetArrayField(TEXT("float_tracks"), FloatTracks);
+
+		FJsonArray VectorTracks;
+		for (const FTTVectorTrack& Track : Timeline->VectorTracks)
+		{
+			TSharedPtr<FJsonObject> Entry = TrackBaseToJson(Track, Track.CurveVector);
+			Entry->SetStringField(TEXT("property"), Track.GetPropertyName().ToString());
+			if (Track.CurveVector)
+			{
+				static const TCHAR* const Channels[] = { TEXT("x"), TEXT("y"), TEXT("z") };
+				TSharedPtr<FJsonObject> Curves = MakeShared<FJsonObject>();
+				for (int32 Index = 0; Index < 3; ++Index)
+				{
+					Curves->SetObjectField(Channels[Index], FMCPInspectionUtils::RichCurveToJson(Track.CurveVector->FloatCurves[Index]));
+				}
+				Entry->SetObjectField(TEXT("curves"), Curves);
+			}
+			VectorTracks.Add(AsValue(Entry));
+		}
+		Result->SetArrayField(TEXT("vector_tracks"), VectorTracks);
+
+		FJsonArray ColorTracks;
+		for (const FTTLinearColorTrack& Track : Timeline->LinearColorTracks)
+		{
+			TSharedPtr<FJsonObject> Entry = TrackBaseToJson(Track, Track.CurveLinearColor);
+			Entry->SetStringField(TEXT("property"), Track.GetPropertyName().ToString());
+			if (Track.CurveLinearColor)
+			{
+				static const TCHAR* const Channels[] = { TEXT("r"), TEXT("g"), TEXT("b"), TEXT("a") };
+				TSharedPtr<FJsonObject> Curves = MakeShared<FJsonObject>();
+				for (int32 Index = 0; Index < 4; ++Index)
+				{
+					Curves->SetObjectField(Channels[Index], FMCPInspectionUtils::RichCurveToJson(Track.CurveLinearColor->FloatCurves[Index]));
+				}
+				Entry->SetObjectField(TEXT("curves"), Curves);
+			}
+			ColorTracks.Add(AsValue(Entry));
+		}
+		Result->SetArrayField(TEXT("linear_color_tracks"), ColorTracks);
+
+		// Event tracks fire a function at each key time (the key values are not meaningful).
+		FJsonArray EventTracks;
+		for (const FTTEventTrack& Track : Timeline->EventTracks)
+		{
+			TSharedPtr<FJsonObject> Entry = TrackBaseToJson(Track, Track.CurveKeys);
+			Entry->SetStringField(TEXT("function"), Track.GetFunctionName().ToString());
+			FJsonArray Times;
+			if (Track.CurveKeys)
+			{
+				for (const FRichCurveKey& Key : Track.CurveKeys->FloatCurve.GetConstRefOfKeys())
+				{
+					Times.Add(MakeShared<FJsonValueNumber>(Key.Time));
+				}
+			}
+			Entry->SetArrayField(TEXT("times"), Times);
+			EventTracks.Add(AsValue(Entry));
+		}
+		Result->SetArrayField(TEXT("event_tracks"), EventTracks);
+
 		return Result;
 	}
 
@@ -349,7 +435,7 @@ namespace
 		}
 		if (bIncludeProperties && Node->ComponentTemplate && Node->ComponentClass)
 		{
-			TSharedPtr<FJsonObject> Props = ChangedProperties(Node->ComponentTemplate, Node->ComponentClass->GetDefaultObject(), nullptr);
+			TSharedPtr<FJsonObject> Props = FMCPInspectionUtils::ChangedProperties(Node->ComponentTemplate, Node->ComponentClass->GetDefaultObject(), nullptr);
 			if (Props->Values.Num() > 0)
 			{
 				Obj->SetObjectField(TEXT("properties"), Props);
@@ -414,7 +500,7 @@ bool FGetBlueprintInfoAction::Validate(const TSharedPtr<FJsonObject>& Params, FM
 			}
 			if (!bKnown)
 			{
-				OutError = FString::Printf(TEXT("Unknown section '%s'. Valid sections: parents, interfaces, graphs, variables, functions, macros, dispatchers, events, components, class_defaults, widgets"), *Section);
+				OutError = FString::Printf(TEXT("Unknown section '%s'. Valid sections: parents, interfaces, graphs, variables, functions, macros, dispatchers, events, components, class_defaults, timelines, widgets"), *Section);
 				return false;
 			}
 		}
@@ -632,6 +718,17 @@ TSharedPtr<FJsonObject> FGetBlueprintInfoAction::ExecuteInternal(const TSharedPt
 		Result->SetArrayField(TEXT("events"), Events);
 	}
 
+	// ---- Timelines (templates with their curves/keys) ----
+	if (Want(TEXT("timelines")))
+	{
+		FJsonArray Timelines;
+		for (const UTimelineTemplate* Timeline : Blueprint->Timelines)
+		{
+			if (Timeline) Timelines.Add(AsValue(TimelineToJson(Timeline)));
+		}
+		Result->SetArrayField(TEXT("timelines"), Timelines);
+	}
+
 	// ---- Components ----
 	if (Want(TEXT("components")))
 	{
@@ -678,7 +775,7 @@ TSharedPtr<FJsonObject> FGetBlueprintInfoAction::ExecuteInternal(const TSharedPt
 				}
 				if (bComponentProps)
 				{
-					TSharedPtr<FJsonObject> Props = ChangedProperties(Component, Component->GetClass()->GetDefaultObject(), nullptr);
+					TSharedPtr<FJsonObject> Props = FMCPInspectionUtils::ChangedProperties(Component, Component->GetClass()->GetDefaultObject(), nullptr);
 					if (Props->Values.Num() > 0)
 					{
 						Entry->SetObjectField(TEXT("properties"), Props);
@@ -696,7 +793,7 @@ TSharedPtr<FJsonObject> FGetBlueprintInfoAction::ExecuteInternal(const TSharedPt
 		TSharedPtr<FJsonObject> Defaults = MakeShared<FJsonObject>();
 		if (DefaultObject && Blueprint->ParentClass)
 		{
-			Defaults = ChangedProperties(DefaultObject, Blueprint->ParentClass->GetDefaultObject(), GeneratedClass);
+			Defaults = FMCPInspectionUtils::ChangedProperties(DefaultObject, Blueprint->ParentClass->GetDefaultObject(), GeneratedClass);
 		}
 		Result->SetObjectField(TEXT("class_defaults"), Defaults);
 	}
@@ -706,33 +803,11 @@ TSharedPtr<FJsonObject> FGetBlueprintInfoAction::ExecuteInternal(const TSharedPt
 	{
 		if (const UWidgetBlueprint* WidgetBP = Cast<UWidgetBlueprint>(Blueprint))
 		{
-			FJsonArray Widgets;
-			if (WidgetBP->WidgetTree)
+			const TSharedPtr<FJsonObject> WidgetData = FMCPInspectionUtils::WidgetBlueprintToJson(WidgetBP, bComponentProps);
+			for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : WidgetData->Values)
 			{
-				TArray<UWidget*> AllWidgets;
-				WidgetBP->WidgetTree->GetAllWidgets(AllWidgets);
-				for (const UWidget* Widget : AllWidgets)
-				{
-					if (!Widget) continue;
-					TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
-					Entry->SetStringField(TEXT("name"), Widget->GetName());
-					Entry->SetStringField(TEXT("class"), Widget->GetClass()->GetName());
-					if (const UPanelWidget* Parent = Widget->GetParent())
-					{
-						Entry->SetStringField(TEXT("parent"), Parent->GetName());
-					}
-					Entry->SetBoolField(TEXT("is_variable"), Widget->bIsVariable);
-					Widgets.Add(AsValue(Entry));
-				}
+				Result->SetField(Pair.Key, Pair.Value);
 			}
-			Result->SetArrayField(TEXT("widgets"), Widgets);
-
-			FJsonArray Animations;
-			for (const UWidgetAnimation* Animation : WidgetBP->Animations)
-			{
-				if (Animation) Animations.Add(AsValue(Animation->GetName()));
-			}
-			Result->SetArrayField(TEXT("widget_animations"), Animations);
 		}
 	}
 

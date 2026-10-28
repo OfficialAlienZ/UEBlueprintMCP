@@ -57,7 +57,8 @@ def get_tools() -> list[Tool]:
                 "Read-only introspection of a Blueprint: parent class chain, interfaces, graph index, "
                 "variables (type, default value, flags, replication), functions (inputs/outputs/locals), "
                 "macros, event dispatchers, events/custom events, components (hierarchy + changed properties), "
-                "class defaults and widget tree. Use it to document a Blueprint or to find out whether a "
+                "class defaults, timelines (length/loop/autoplay and every float/vector/color/event track with its "
+                "curve keys) and widget tree. Use it to document a Blueprint or to find out whether a "
                 "called function is local, a custom event, or inherited. Graph names returned here can be "
                 "passed as graph_name to find_blueprint_nodes / get_node_pins (works for functions, macros, "
                 "dispatcher signatures and collapsed graphs)."
@@ -72,7 +73,7 @@ def get_tools() -> list[Tool]:
                             "type": "string",
                             "enum": [
                                 "parents", "interfaces", "graphs", "variables", "functions", "macros",
-                                "dispatchers", "events", "components", "class_defaults", "widgets"
+                                "dispatchers", "events", "components", "class_defaults", "timelines", "widgets"
                             ]
                         },
                         "description": "Sections to include (default: all). Summary fields are always returned."
@@ -83,6 +84,79 @@ def get_tools() -> list[Tool]:
                     }
                 },
                 "required": ["blueprint_name"]
+            }
+        ),
+        Tool(
+            name="get_behavior_tree_info",
+            description=(
+                "Read-only introspection of a Behavior Tree or Blackboard asset. For a Behavior Tree returns the "
+                "Blackboard (keys with types), root decorators and the full node tree: each node has class, name, "
+                "static description (human readable, e.g. the blackboard condition), changed properties, services, "
+                "and ordered children (left to right = execution order). Decorators sit on the connection to a "
+                "child and include inverse_condition, flow_abort_mode and decorator_logic (And/Or/Not). Passing a "
+                "Blackboard asset name returns only its keys. Blueprint-based tasks/decorators/services include a "
+                "'blueprint' path; inspect them with get_blueprint_info."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "asset_name": {"type": "string", "description": "Behavior Tree or Blackboard name, or full asset path (e.g. /Game/AI/BT_Enemy)"},
+                    "include_properties": {
+                        "type": "boolean",
+                        "description": "Include node/key properties that differ from class defaults (default true)"
+                    }
+                },
+                "required": ["asset_name"]
+            }
+        ),
+        Tool(
+            name="get_enum_info",
+            description=(
+                "Read-only introspection of an Enum: a User Defined Enum asset (e.g. /Game/Data/E_State) or a "
+                "native enum (e.g. ECollisionChannel). Returns every entry with index, internal name, "
+                "display_name (the name authored in the editor), numeric value, tooltip and hidden flag. "
+                "The auto-generated _MAX entry is omitted."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "enum_name": {"type": "string", "description": "Enum asset name or full path, or native enum name"}
+                },
+                "required": ["enum_name"]
+            }
+        ),
+        Tool(
+            name="get_curve_info",
+            description=(
+                "Read-only introspection of a Curve asset: CurveFloat, CurveVector (x/y/z), CurveLinearColor "
+                "(r/g/b/a) or CurveTable (one curve per row). Each curve lists its keys (time, value, interp, "
+                "tangents for cubic keys) and the pre/post extrapolation modes."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "curve_name": {"type": "string", "description": "Curve asset name or full path (e.g. /Game/Curves/C_Speed)"}
+                },
+                "required": ["curve_name"]
+            }
+        ),
+        Tool(
+            name="get_data_table_info",
+            description=(
+                "Read-only introspection of a Data Table asset. Returns the row struct, its columns (authored "
+                "name + type) and the rows in table order. Values of User Defined Structs use authored field "
+                "names and User Defined Enums use their display names. Rows are paginated (default 200)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "table_name": {"type": "string", "description": "Data Table name or full path (e.g. /Game/Data/DT_Items)"},
+                    "include_rows": {"type": "boolean", "description": "Include row values (default true). When false only row_names are returned"},
+                    "row_names": {"type": "array", "items": {"type": "string"}, "description": "Only return these rows"},
+                    "offset": {"type": "integer", "description": "Rows to skip (default 0)"},
+                    "limit": {"type": "integer", "description": "Max rows to return (default 200)"}
+                },
+                "required": ["table_name"]
             }
         ),
         Tool(
@@ -200,6 +274,10 @@ TOOL_HANDLERS = {
     "create_blueprint": "create_blueprint",
     "compile_blueprint": "compile_blueprint",
     "get_blueprint_info": "get_blueprint_info",
+    "get_behavior_tree_info": "get_behavior_tree_info",
+    "get_enum_info": "get_enum_info",
+    "get_curve_info": "get_curve_info",
+    "get_data_table_info": "get_data_table_info",
     "set_blueprint_property": "set_blueprint_property",
     "add_component_to_blueprint": "add_component_to_blueprint",
     "set_static_mesh_properties": "set_static_mesh_properties",

@@ -44,6 +44,7 @@ def get_tools() -> list[Tool]:
                     "limit": {"type": "integer", "description": "Max actors to return (default 100, max 1000)"},
                     "offset": {"type": "integer", "description": "Number of matching actors to skip (default 0)"},
                     "include_transform": {"type": "boolean", "description": "Include location/rotation/scale (default false)"},
+                    "include_details": {"type": "boolean", "description": "Include level placement details per actor: label, level, folder, tags, attachment, components with relative transforms (default false)"},
                     "summary_only": {"type": "boolean", "description": "Return only per-class actor counts (default false)"}
                 }
             }
@@ -59,6 +60,7 @@ def get_tools() -> list[Tool]:
                     "limit": {"type": "integer", "description": "Max actors to return (default 100, max 1000)"},
                     "offset": {"type": "integer", "description": "Number of matching actors to skip (default 0)"},
                     "include_transform": {"type": "boolean", "description": "Include location/rotation/scale (default false)"},
+                    "include_details": {"type": "boolean", "description": "Include level placement details per actor: label, level, folder, tags, attachment, components with relative transforms (default false)"},
                     "summary_only": {"type": "boolean", "description": "Return only per-class actor counts (default false)"}
                 },
                 "required": ["pattern"]
@@ -135,11 +137,16 @@ def get_tools() -> list[Tool]:
         ),
         Tool(
             name="get_actor_properties",
-            description="Get all properties of an actor.",
+            description=(
+                "Get an actor's level placement: name, label, class (and Blueprint path), level, folder, tags, "
+                "transform, attachment, every component (class, creation method, attachment, relative transform, "
+                "properties changed from the archetype) and the actor properties overridden from the class defaults."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string", "description": "Name of the actor"}
+                    "name": {"type": "string", "description": "Name of the actor"},
+                    "include_properties": {"type": "boolean", "description": "Include changed component/actor properties (default true)"}
                 },
                 "required": ["name"]
             }

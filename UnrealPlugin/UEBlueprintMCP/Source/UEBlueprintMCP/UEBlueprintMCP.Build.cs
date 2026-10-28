@@ -66,6 +66,8 @@ public class UEBlueprintMCP : ModuleRules
 			"AssetTools",
 			"MaterialEditor",     // For UMaterialEditingLibrary and material expression manipulation
 			"RenderCore",         // For material shader compilation
+			"AIModule",           // For Behavior Tree / Blackboard introspection
+			"GameplayTasks",      // Required by AIModule headers
 		});
 
 		bool bEnhancedInput = ShouldUseEnhancedInput(Target);

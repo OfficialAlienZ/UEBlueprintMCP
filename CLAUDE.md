@@ -27,11 +27,14 @@ UEBlueprintMCP/
 │       │   ├── MCPServer.h          # TCP server
 │       │   ├── MCPContext.h         # Stateful editor context
 │       │   ├── MCPCommonUtils.h     # Shared utilities
+│       │   ├── MCPInspectionUtils.h # Shared read-only introspection helpers (curves, properties, actors, widgets)
 │       │   └── Actions/             # Action class headers
 │       │       ├── EditorAction.h   # Base classes (FEditorAction hierarchy)
 │       │       ├── BlueprintActions.h
 │       │       ├── EditorActions.h
 │       │       ├── InspectionActions.h  # Read-only introspection (get_blueprint_info)
+│       │       ├── AIActions.h          # Behavior Tree / Blackboard introspection
+│       │       ├── AssetInspectionActions.h # Enum / Curve / Data Table introspection
 │       │       ├── NodeActions.h
 │       │       ├── ProjectActions.h
 │       │       ├── UMGActions.h
@@ -41,11 +44,14 @@ UEBlueprintMCP/
 │           ├── MCPServer.cpp        # TCP listener, JSON parsing
 │           ├── MCPContext.cpp       # Context state, auto-save
 │           ├── MCPCommonUtils.cpp   # Blueprint/asset resolution
+│           ├── MCPInspectionUtils.cpp
 │           └── Actions/             # Action implementations
 │               ├── EditorAction.cpp # Base class + execution pipeline
 │               ├── BlueprintActions.cpp
 │               ├── EditorActions.cpp
 │               ├── InspectionActions.cpp
+│               ├── AIActions.cpp
+│               ├── AssetInspectionActions.cpp
 │               ├── NodeActions.cpp
 │               ├── ProjectActions.cpp
 │               ├── UMGActions.cpp

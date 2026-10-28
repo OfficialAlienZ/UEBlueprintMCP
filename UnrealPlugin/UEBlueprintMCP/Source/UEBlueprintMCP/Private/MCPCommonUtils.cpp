@@ -12,12 +12,14 @@
 #include "EdGraph/EdGraphPin.h"
 #include "EdGraphSchema_K2.h"
 #include "K2Node_Event.h"
+#include "K2Node_ComponentBoundEvent.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_VariableGet.h"
 #include "K2Node_VariableSet.h"
 #include "K2Node_CustomEvent.h"
 #include "K2Node_MacroInstance.h"
 #include "K2Node_DynamicCast.h"
+#include "K2Node_Timeline.h"
 #include "K2Node_Self.h"
 #include "K2Node_InputAction.h"
 #include "Kismet2/BlueprintEditorUtils.h"
@@ -431,6 +433,17 @@ TSharedPtr<FJsonObject> FMCPCommonUtils::NodeToJson(UEdGraphNode* Node, bool bIn
 	{
 		NodeObj->SetStringField(TEXT("event_name"), CustomEvent->CustomFunctionName.ToString());
 	}
+	else if (UK2Node_ComponentBoundEvent* BoundEvent = Cast<UK2Node_ComponentBoundEvent>(Node))
+	{
+		// Component delegate event (e.g. OnComponentBeginOverlap of a SphereCollision component).
+		NodeObj->SetStringField(TEXT("event_name"), BoundEvent->CustomFunctionName.ToString());
+		NodeObj->SetStringField(TEXT("component_name"), BoundEvent->ComponentPropertyName.ToString());
+		NodeObj->SetStringField(TEXT("delegate_name"), BoundEvent->DelegatePropertyName.ToString());
+		if (BoundEvent->DelegateOwnerClass)
+		{
+			NodeObj->SetStringField(TEXT("delegate_owner"), BoundEvent->DelegateOwnerClass->GetName());
+		}
+	}
 	else if (UK2Node_Event* EventNode = Cast<UK2Node_Event>(Node))
 	{
 		NodeObj->SetStringField(TEXT("event_name"), EventNode->EventReference.GetMemberName().ToString());
@@ -452,6 +465,11 @@ TSharedPtr<FJsonObject> FMCPCommonUtils::NodeToJson(UEdGraphNode* Node, bool bIn
 		{
 			NodeObj->SetStringField(TEXT("cast_target"), CastNode->TargetType->GetName());
 		}
+	}
+	else if (UK2Node_Timeline* TimelineNode = Cast<UK2Node_Timeline>(Node))
+	{
+		// Curves/keys are available via get_blueprint_info sections=["timelines"].
+		NodeObj->SetStringField(TEXT("timeline_name"), TimelineNode->TimelineName.ToString());
 	}
 
 	if (bIncludePins)
