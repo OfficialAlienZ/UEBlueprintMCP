@@ -31,6 +31,7 @@ UEBlueprintMCP/
 │       │       ├── EditorAction.h   # Base classes (FEditorAction hierarchy)
 │       │       ├── BlueprintActions.h
 │       │       ├── EditorActions.h
+│       │       ├── InspectionActions.h  # Read-only introspection (get_blueprint_info)
 │       │       ├── NodeActions.h
 │       │       ├── ProjectActions.h
 │       │       ├── UMGActions.h
@@ -44,6 +45,7 @@ UEBlueprintMCP/
 │               ├── EditorAction.cpp # Base class + execution pipeline
 │               ├── BlueprintActions.cpp
 │               ├── EditorActions.cpp
+│               ├── InspectionActions.cpp
 │               ├── NodeActions.cpp
 │               ├── ProjectActions.cpp
 │               ├── UMGActions.cpp

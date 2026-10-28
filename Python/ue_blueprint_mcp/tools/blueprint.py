@@ -52,6 +52,40 @@ def get_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="get_blueprint_info",
+            description=(
+                "Read-only introspection of a Blueprint: parent class chain, interfaces, graph index, "
+                "variables (type, default value, flags, replication), functions (inputs/outputs/locals), "
+                "macros, event dispatchers, events/custom events, components (hierarchy + changed properties), "
+                "class defaults and widget tree. Use it to document a Blueprint or to find out whether a "
+                "called function is local, a custom event, or inherited. Graph names returned here can be "
+                "passed as graph_name to find_blueprint_nodes / get_node_pins (works for functions, macros, "
+                "dispatcher signatures and collapsed graphs)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "blueprint_name": {"type": "string", "description": "Blueprint name or full asset path (e.g. /Game/Folder/BP_Name)"},
+                    "sections": {
+                        "type": "array",
+                        "items": {
+                            "type": "string",
+                            "enum": [
+                                "parents", "interfaces", "graphs", "variables", "functions", "macros",
+                                "dispatchers", "events", "components", "class_defaults", "widgets"
+                            ]
+                        },
+                        "description": "Sections to include (default: all). Summary fields are always returned."
+                    },
+                    "include_component_properties": {
+                        "type": "boolean",
+                        "description": "Include component properties that differ from class defaults (default true)"
+                    }
+                },
+                "required": ["blueprint_name"]
+            }
+        ),
+        Tool(
             name="set_blueprint_property",
             description="Set a property on a Blueprint class default object.",
             inputSchema={
@@ -165,6 +199,7 @@ def get_tools() -> list[Tool]:
 TOOL_HANDLERS = {
     "create_blueprint": "create_blueprint",
     "compile_blueprint": "compile_blueprint",
+    "get_blueprint_info": "get_blueprint_info",
     "set_blueprint_property": "set_blueprint_property",
     "add_component_to_blueprint": "add_component_to_blueprint",
     "set_static_mesh_properties": "set_static_mesh_properties",

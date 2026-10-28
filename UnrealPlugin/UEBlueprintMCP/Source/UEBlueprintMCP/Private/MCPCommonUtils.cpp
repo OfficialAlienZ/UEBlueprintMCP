@@ -15,6 +15,9 @@
 #include "K2Node_CallFunction.h"
 #include "K2Node_VariableGet.h"
 #include "K2Node_VariableSet.h"
+#include "K2Node_CustomEvent.h"
+#include "K2Node_MacroInstance.h"
+#include "K2Node_DynamicCast.h"
 #include "K2Node_Self.h"
 #include "K2Node_InputAction.h"
 #include "Kismet2/BlueprintEditorUtils.h"
@@ -209,6 +212,54 @@ UEdGraph* FMCPCommonUtils::FindGraphByName(UBlueprint* Blueprint, const FString&
 		}
 	}
 
+	// Macros, event dispatcher signatures, interface graphs, collapsed sub-graphs
+	return FindSpecialGraphByName(Blueprint, GraphName);
+}
+
+UEdGraph* FMCPCommonUtils::FindSpecialGraphByName(UBlueprint* Blueprint, const FString& GraphName)
+{
+	if (!Blueprint || GraphName.IsEmpty())
+	{
+		return nullptr;
+	}
+
+	const FName GraphFName(*GraphName);
+
+	TArray<UEdGraph*> TopLevel;
+	TopLevel.Append(Blueprint->MacroGraphs);
+	TopLevel.Append(Blueprint->DelegateSignatureGraphs);
+	for (const FBPInterfaceDescription& Interface : Blueprint->ImplementedInterfaces)
+	{
+		TopLevel.Append(Interface.Graphs);
+	}
+
+	for (UEdGraph* Graph : TopLevel)
+	{
+		if (Graph && Graph->GetFName() == GraphFName)
+		{
+			return Graph;
+		}
+	}
+
+	// Collapsed graphs (composite nodes) nested inside any graph
+	TArray<UEdGraph*> Roots;
+	Roots.Append(Blueprint->UbergraphPages);
+	Roots.Append(Blueprint->FunctionGraphs);
+	Roots.Append(TopLevel);
+	for (UEdGraph* Root : Roots)
+	{
+		if (!Root) continue;
+		TArray<UEdGraph*> Children;
+		Root->GetAllChildrenGraphs(Children);
+		for (UEdGraph* Child : Children)
+		{
+			if (Child && Child->GetFName() == GraphFName)
+			{
+				return Child;
+			}
+		}
+	}
+
 	return nullptr;
 }
 
@@ -240,6 +291,182 @@ USCS_Node* FMCPCommonUtils::FindComponentNode(UBlueprint* Blueprint, const FStri
 	}
 
 	return nullptr;
+}
+
+// =========================================================================
+// Introspection JSON Serialization
+// =========================================================================
+
+TSharedPtr<FJsonObject> FMCPCommonUtils::PinTypeToJson(const FEdGraphPinType& PinType)
+{
+	TSharedPtr<FJsonObject> Obj = MakeShared<FJsonObject>();
+	Obj->SetStringField(TEXT("type"), UEdGraphSchema_K2::TypeToText(PinType).ToString());
+	Obj->SetStringField(TEXT("category"), PinType.PinCategory.ToString());
+	if (PinType.PinSubCategory != NAME_None)
+	{
+		Obj->SetStringField(TEXT("sub_category"), PinType.PinSubCategory.ToString());
+	}
+	if (UObject* SubObject = PinType.PinSubCategoryObject.Get())
+	{
+		Obj->SetStringField(TEXT("sub_category_object"), SubObject->GetName());
+	}
+	if (PinType.IsArray())
+	{
+		Obj->SetStringField(TEXT("container"), TEXT("array"));
+	}
+	else if (PinType.IsSet())
+	{
+		Obj->SetStringField(TEXT("container"), TEXT("set"));
+	}
+	else if (PinType.IsMap())
+	{
+		Obj->SetStringField(TEXT("container"), TEXT("map"));
+	}
+	return Obj;
+}
+
+TSharedPtr<FJsonObject> FMCPCommonUtils::PinToJson(const UEdGraphPin* Pin, bool bIncludeConnections)
+{
+	TSharedPtr<FJsonObject> PinObj = MakeShared<FJsonObject>();
+	PinObj->SetStringField(TEXT("name"), Pin->PinName.ToString());
+	PinObj->SetStringField(TEXT("direction"), Pin->Direction == EGPD_Input ? TEXT("Input") : TEXT("Output"));
+	PinObj->SetStringField(TEXT("category"), Pin->PinType.PinCategory.ToString());
+	if (Pin->PinType.PinSubCategory != NAME_None)
+	{
+		PinObj->SetStringField(TEXT("sub_category"), Pin->PinType.PinSubCategory.ToString());
+	}
+	if (Pin->PinType.PinSubCategoryObject.Get())
+	{
+		PinObj->SetStringField(TEXT("sub_category_object"), Pin->PinType.PinSubCategoryObject->GetName());
+	}
+	PinObj->SetStringField(TEXT("type"), UEdGraphSchema_K2::TypeToText(Pin->PinType).ToString());
+	PinObj->SetBoolField(TEXT("is_hidden"), Pin->bHidden);
+
+	if (!Pin->PinFriendlyName.IsEmpty())
+	{
+		PinObj->SetStringField(TEXT("friendly_name"), Pin->PinFriendlyName.ToString());
+	}
+	if (!Pin->DefaultValue.IsEmpty())
+	{
+		PinObj->SetStringField(TEXT("default_value"), Pin->DefaultValue);
+	}
+	if (Pin->DefaultObject)
+	{
+		PinObj->SetStringField(TEXT("default_object"), Pin->DefaultObject->GetPathName());
+	}
+	if (!Pin->DefaultTextValue.IsEmpty())
+	{
+		PinObj->SetStringField(TEXT("default_text"), Pin->DefaultTextValue.ToString());
+	}
+
+	if (bIncludeConnections)
+	{
+		TArray<TSharedPtr<FJsonValue>> Links;
+		for (const UEdGraphPin* Linked : Pin->LinkedTo)
+		{
+			if (!Linked) continue;
+			TSharedPtr<FJsonObject> LinkObj = MakeShared<FJsonObject>();
+			if (const UEdGraphNode* LinkedNode = Linked->GetOwningNodeUnchecked())
+			{
+				LinkObj->SetStringField(TEXT("node_guid"), LinkedNode->NodeGuid.ToString());
+				LinkObj->SetStringField(TEXT("node_title"), LinkedNode->GetNodeTitle(ENodeTitleType::ListView).ToString());
+			}
+			LinkObj->SetStringField(TEXT("pin"), Linked->PinName.ToString());
+			Links.Add(MakeShared<FJsonValueObject>(LinkObj));
+		}
+		PinObj->SetArrayField(TEXT("linked_to"), Links);
+	}
+
+	return PinObj;
+}
+
+TSharedPtr<FJsonObject> FMCPCommonUtils::NodeToJson(UEdGraphNode* Node, bool bIncludePins)
+{
+	TSharedPtr<FJsonObject> NodeObj = MakeShared<FJsonObject>();
+	NodeObj->SetStringField(TEXT("node_guid"), Node->NodeGuid.ToString());
+	NodeObj->SetStringField(TEXT("node_class"), Node->GetClass()->GetName());
+	NodeObj->SetStringField(TEXT("node_title"), Node->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
+	NodeObj->SetNumberField(TEXT("node_x"), Node->NodePosX);
+	NodeObj->SetNumberField(TEXT("node_y"), Node->NodePosY);
+	if (!Node->NodeComment.IsEmpty())
+	{
+		NodeObj->SetStringField(TEXT("node_comment"), Node->NodeComment);
+	}
+	if (Node->GetDesiredEnabledState() != ENodeEnabledState::Enabled)
+	{
+		NodeObj->SetBoolField(TEXT("is_disabled"), true);
+	}
+
+	if (UK2Node_CallFunction* CallNode = Cast<UK2Node_CallFunction>(Node))
+	{
+		NodeObj->SetStringField(TEXT("function_name"), CallNode->FunctionReference.GetMemberName().ToString());
+		NodeObj->SetBoolField(TEXT("is_self_context"), CallNode->FunctionReference.IsSelfContext());
+		NodeObj->SetBoolField(TEXT("is_pure"), CallNode->IsNodePure());
+
+		UFunction* Function = CallNode->GetTargetFunction();
+		NodeObj->SetBoolField(TEXT("function_resolved"), Function != nullptr);
+		UClass* OwnerClass = Function ? Function->GetOwnerClass() : nullptr;
+		if (!OwnerClass && !CallNode->FunctionReference.IsSelfContext())
+		{
+			OwnerClass = CallNode->FunctionReference.GetMemberParentClass();
+		}
+		if (OwnerClass)
+		{
+			NodeObj->SetStringField(TEXT("function_owner"), OwnerClass->GetName());
+			NodeObj->SetStringField(TEXT("function_owner_path"), OwnerClass->GetPathName());
+		}
+	}
+	else if (UK2Node_Variable* VarNode = Cast<UK2Node_Variable>(Node))
+	{
+		NodeObj->SetStringField(TEXT("variable_name"), VarNode->GetVarName().ToString());
+		if (!VarNode->VariableReference.IsSelfContext())
+		{
+			if (UClass* SourceClass = VarNode->GetVariableSourceClass())
+			{
+				NodeObj->SetStringField(TEXT("variable_owner"), SourceClass->GetName());
+			}
+		}
+	}
+	else if (UK2Node_CustomEvent* CustomEvent = Cast<UK2Node_CustomEvent>(Node))
+	{
+		NodeObj->SetStringField(TEXT("event_name"), CustomEvent->CustomFunctionName.ToString());
+	}
+	else if (UK2Node_Event* EventNode = Cast<UK2Node_Event>(Node))
+	{
+		NodeObj->SetStringField(TEXT("event_name"), EventNode->EventReference.GetMemberName().ToString());
+	}
+	else if (UK2Node_MacroInstance* MacroNode = Cast<UK2Node_MacroInstance>(Node))
+	{
+		if (UEdGraph* MacroGraph = MacroNode->GetMacroGraph())
+		{
+			NodeObj->SetStringField(TEXT("macro_name"), MacroGraph->GetName());
+		}
+		if (UBlueprint* MacroBP = MacroNode->GetSourceBlueprint())
+		{
+			NodeObj->SetStringField(TEXT("macro_blueprint"), MacroBP->GetPathName());
+		}
+	}
+	else if (UK2Node_DynamicCast* CastNode = Cast<UK2Node_DynamicCast>(Node))
+	{
+		if (CastNode->TargetType)
+		{
+			NodeObj->SetStringField(TEXT("cast_target"), CastNode->TargetType->GetName());
+		}
+	}
+
+	if (bIncludePins)
+	{
+		TArray<TSharedPtr<FJsonValue>> PinsArray;
+		for (UEdGraphPin* Pin : Node->Pins)
+		{
+			if (!Pin) continue;
+			if (Pin->bHidden && Pin->LinkedTo.Num() == 0) continue;
+			PinsArray.Add(MakeShared<FJsonValueObject>(PinToJson(Pin, true)));
+		}
+		NodeObj->SetArrayField(TEXT("pins"), PinsArray);
+	}
+
+	return NodeObj;
 }
 
 // =========================================================================

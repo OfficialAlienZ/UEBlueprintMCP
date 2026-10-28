@@ -7,6 +7,7 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
+#include "EdGraphNode_Comment.h"
 #include "EdGraphSchema_K2.h"
 #include "EdGraphSchema_K2_Actions.h"
 #include "K2Node_Event.h"
@@ -152,10 +153,14 @@ TSharedPtr<FJsonObject> FFindBlueprintNodesAction::ExecuteInternal(const TShared
 {
 	FString NodeType = GetOptionalString(Params, TEXT("node_type"));
 	FString EventName = GetOptionalString(Params, TEXT("event_name"));
+	const bool bFullDetail = GetOptionalString(Params, TEXT("detail"), TEXT("basic")).Equals(TEXT("full"), ESearchCase::IgnoreCase);
+	const int32 Offset = FMath::Max(0, (int32)GetOptionalNumber(Params, TEXT("offset"), 0));
+	const int32 Limit = FMath::Max(0, (int32)GetOptionalNumber(Params, TEXT("limit"), 0));
 
 	UEdGraph* TargetGraph = GetTargetGraph(Params, Context);
 
 	TArray<TSharedPtr<FJsonValue>> NodesArray;
+	int32 TotalMatches = 0;
 
 	for (UEdGraphNode* Node : TargetGraph->Nodes)
 	{
@@ -163,7 +168,7 @@ TSharedPtr<FJsonObject> FFindBlueprintNodesAction::ExecuteInternal(const TShared
 
 		bool bMatch = false;
 
-		if (NodeType.IsEmpty())
+		if (NodeType.IsEmpty() || NodeType.Equals(TEXT("All"), ESearchCase::IgnoreCase))
 		{
 			// No filter - include all nodes
 			bMatch = true;
@@ -209,20 +214,34 @@ TSharedPtr<FJsonObject> FFindBlueprintNodesAction::ExecuteInternal(const TShared
 				bMatch = true;
 			}
 		}
+		else if (NodeType == TEXT("Macro"))
+		{
+			bMatch = Cast<UK2Node_MacroInstance>(Node) != nullptr;
+		}
+		else if (NodeType == TEXT("Cast"))
+		{
+			bMatch = Cast<UK2Node_DynamicCast>(Node) != nullptr;
+		}
+		else if (NodeType == TEXT("Comment"))
+		{
+			bMatch = Cast<UEdGraphNode_Comment>(Node) != nullptr;
+		}
 
 		if (bMatch)
 		{
-			TSharedPtr<FJsonObject> NodeObj = MakeShared<FJsonObject>();
-			NodeObj->SetStringField(TEXT("node_guid"), Node->NodeGuid.ToString());
-			NodeObj->SetStringField(TEXT("node_class"), Node->GetClass()->GetName());
-			NodeObj->SetStringField(TEXT("node_title"), Node->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
-			NodesArray.Add(MakeShared<FJsonValueObject>(NodeObj));
+			if (TotalMatches++ < Offset || (Limit > 0 && NodesArray.Num() >= Limit))
+			{
+				continue;
+			}
+			NodesArray.Add(MakeShared<FJsonValueObject>(FMCPCommonUtils::NodeToJson(Node, bFullDetail)));
 		}
 	}
 
 	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
+	ResultData->SetStringField(TEXT("graph_name"), TargetGraph->GetName());
 	ResultData->SetArrayField(TEXT("nodes"), NodesArray);
 	ResultData->SetNumberField(TEXT("count"), NodesArray.Num());
+	ResultData->SetNumberField(TEXT("total_matches"), TotalMatches);
 	return CreateSuccessResponse(ResultData);
 }
 
@@ -306,28 +325,17 @@ TSharedPtr<FJsonObject> FGetNodePinsAction::ExecuteInternal(const TSharedPtr<FJs
 		return CreateErrorResponse(FString::Printf(TEXT("Node not found with ID: %s"), *NodeId));
 	}
 
-	// Build array of pin info
+	// Build array of pin info (includes defaults and linked_to connections)
 	TArray<TSharedPtr<FJsonValue>> PinsArray;
 	for (UEdGraphPin* Pin : FoundNode->Pins)
 	{
-		TSharedPtr<FJsonObject> PinObj = MakeShared<FJsonObject>();
-		PinObj->SetStringField(TEXT("name"), Pin->PinName.ToString());
-		PinObj->SetStringField(TEXT("direction"), Pin->Direction == EGPD_Input ? TEXT("Input") : TEXT("Output"));
-		PinObj->SetStringField(TEXT("category"), Pin->PinType.PinCategory.ToString());
-		if (Pin->PinType.PinSubCategory != NAME_None)
-		{
-			PinObj->SetStringField(TEXT("sub_category"), Pin->PinType.PinSubCategory.ToString());
-		}
-		if (Pin->PinType.PinSubCategoryObject.Get())
-		{
-			PinObj->SetStringField(TEXT("sub_category_object"), Pin->PinType.PinSubCategoryObject->GetName());
-		}
-		PinObj->SetBoolField(TEXT("is_hidden"), Pin->bHidden);
-		PinsArray.Add(MakeShared<FJsonValueObject>(PinObj));
+		if (!Pin) continue;
+		PinsArray.Add(MakeShared<FJsonValueObject>(FMCPCommonUtils::PinToJson(Pin, true)));
 	}
 
 	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
 	ResultData->SetStringField(TEXT("node_class"), FoundNode->GetClass()->GetName());
+	ResultData->SetStringField(TEXT("node_title"), FoundNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
 	ResultData->SetArrayField(TEXT("pins"), PinsArray);
 	return CreateSuccessResponse(ResultData);
 }

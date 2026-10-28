@@ -18,6 +18,7 @@ class UK2Node_VariableSet;
 class UK2Node_Self;
 class UK2Node_InputAction;
 class USCS_Node;
+struct FEdGraphPinType;
 
 /**
  * Common utility functions for MCP commands.
@@ -55,8 +56,32 @@ public:
 	/** Find any graph by name (event graph, function graph, etc.) */
 	static UEdGraph* FindGraphByName(UBlueprint* Blueprint, const FString& GraphName);
 
+	/**
+	 * Find a graph that is not an event/function graph: macro graphs, event dispatcher
+	 * signature graphs, interface graphs and collapsed (composite) sub-graphs.
+	 * Sub-graph names are not unique; the first match wins.
+	 */
+	static UEdGraph* FindSpecialGraphByName(UBlueprint* Blueprint, const FString& GraphName);
+
 	/** Find a component node in a Blueprint (traverses parent hierarchy) */
 	static USCS_Node* FindComponentNode(UBlueprint* Blueprint, const FString& ComponentName);
+
+	// =========================================================================
+	// Introspection JSON Serialization
+	// =========================================================================
+
+	/** Serialize a pin type: category, sub_category, sub_category_object, container, type (display text) */
+	static TSharedPtr<FJsonObject> PinTypeToJson(const FEdGraphPinType& PinType);
+
+	/** Serialize a pin: name, direction, type info, default value and (optionally) linked_to connections */
+	static TSharedPtr<FJsonObject> PinToJson(const UEdGraphPin* Pin, bool bIncludeConnections);
+
+	/**
+	 * Serialize a node: guid, class, title, position, comment, plus kind-specific info
+	 * (function name/owner, variable name, event name, macro, cast target).
+	 * When bIncludePins is true, a "pins" array with connections is added (unlinked hidden pins are skipped).
+	 */
+	static TSharedPtr<FJsonObject> NodeToJson(UEdGraphNode* Node, bool bIncludePins);
 
 	// =========================================================================
 	// Property Setting Utilities

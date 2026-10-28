@@ -385,14 +385,22 @@ def get_tools() -> list[Tool]:
         ),
         Tool(
             name="find_blueprint_nodes",
-            description="Find nodes in a Blueprint's graph (event graph or function graph).",
+            description=(
+                "Find nodes in a graph (event graph, function, macro, dispatcher signature or collapsed graph). "
+                "Basic detail returns guid, class, title, position, comment and function/variable/event/macro info "
+                "(function_owner shows where a called function lives). detail='full' also returns every pin with "
+                "default values and linked_to connections, which is enough to trace execution flow."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
-                    "graph_name": {"type": "string", "description": "Optional function graph name (defaults to event graph)"},
-                    "node_type": {"type": "string", "description": "Type of node (Event, Function, Variable, etc.)"},
-                    "event_type": {"type": "string", "description": "Specific event type (BeginPlay, Tick, etc.)"}
+                    "graph_name": {"type": "string", "description": "Graph name (defaults to event graph). See get_blueprint_info 'graphs'."},
+                    "node_type": {"type": "string", "description": "Filter: Event, Function, Variable, Macro, Cast, Comment, All (default All)"},
+                    "event_name": {"type": "string", "description": "With node_type=Event: specific event (ReceiveBeginPlay, custom event name, ...)"},
+                    "detail": {"type": "string", "enum": ["basic", "full"], "description": "'full' adds pins with defaults and connections (default basic)"},
+                    "limit": {"type": "integer", "description": "Max nodes to return (0 = no limit)"},
+                    "offset": {"type": "integer", "description": "Skip this many matching nodes (for paging)"}
                 },
                 "required": ["blueprint_name"]
             }
@@ -412,7 +420,7 @@ def get_tools() -> list[Tool]:
         ),
         Tool(
             name="get_node_pins",
-            description="Get all pins on a node for debugging connection issues.",
+            description="Get all pins on a node: type, default value and linked_to connections (node guid, title, pin).",
             inputSchema={
                 "type": "object",
                 "properties": {

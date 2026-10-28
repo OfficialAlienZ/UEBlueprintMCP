@@ -5,6 +5,7 @@
 #include "Actions/EditorAction.h"
 #include "Actions/BlueprintActions.h"
 #include "Actions/EditorActions.h"
+#include "Actions/InspectionActions.h"
 #include "Actions/NodeActions.h"
 #include "Actions/ProjectActions.h"
 #include "Actions/UMGActions.h"
@@ -77,6 +78,11 @@ void UMCPBridge::RegisterActions()
 	ActionHandlers.Add(TEXT("set_physics_properties"), MakeShared<FSetPhysicsPropertiesAction>());
 	ActionHandlers.Add(TEXT("set_blueprint_property"), MakeShared<FSetBlueprintPropertyAction>());
 	ActionHandlers.Add(TEXT("create_colored_material"), MakeShared<FCreateColoredMaterialAction>());
+
+	// =========================================================================
+	// Inspection Actions (read-only introspection)
+	// =========================================================================
+	ActionHandlers.Add(TEXT("get_blueprint_info"), MakeShared<FGetBlueprintInfoAction>());
 
 	// =========================================================================
 	// Editor Actions (actors, viewport, save)

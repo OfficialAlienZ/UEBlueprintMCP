@@ -18,9 +18,12 @@ This skill provides specialized knowledge for working with Unreal Engine Bluepri
 ### Blueprint Creation & Management
 - `create_blueprint` - Create new Blueprint class (supports parent: Actor, Pawn, PlayerController, GameModeBase, GameStateBase)
 - `compile_blueprint` - Compile and auto-save; returns error_count, warning_count, detailed errors with node IDs
-- `find_blueprint_nodes` - List all nodes in a blueprint (returns node_guid, node_class, node_title); supports `graph_name` for function graphs
+- `find_blueprint_nodes` - List nodes in a graph (guid, class, title, position, comment, plus function_name/function_owner, variable_name, event_name, macro_name, cast_target). `detail="full"` adds every pin with defaults and `linked_to` connections (enough to trace execution flow). Filters: `node_type` (Event/Function/Variable/Macro/Cast/Comment), `event_name`; paging: `limit`/`offset`. `graph_name` accepts function, macro, event dispatcher signature, interface and collapsed graphs
 - `delete_blueprint_node` - Remove a node by GUID; supports `graph_name` for function graphs
-- `get_node_pins` - Debug tool: list all pins on a node; supports `graph_name` for function graphs
+- `get_node_pins` - List all pins on a node with type, default value and `linked_to` connections; supports `graph_name`
+
+### Introspection (read-only, for documenting Blueprints)
+- `get_blueprint_info` - Parent class chain, interfaces, graph index, variables (type, default value, instance editable, replication, tooltip), functions (inputs/outputs/locals), macros, event dispatchers, events and custom events (custom events are callable like functions), components (hierarchy + properties changed from defaults, plus inherited), class defaults, widget tree. Use `sections` to limit output, e.g. `["variables", "functions"]`. A called function whose `function_owner` (from `find_blueprint_nodes`) is a parent class is inherited, not local. Macros defined in a Macro Library Blueprint can be inspected by passing that Blueprint's name.
 
 ### Components
 - `add_component_to_blueprint` - Add StaticMeshComponent, BoxComponent, SphereComponent, SceneComponent, CameraComponent

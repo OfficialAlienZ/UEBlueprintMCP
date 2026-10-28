@@ -218,7 +218,15 @@ UEdGraph* FEditorAction::FindGraph(UBlueprint* Blueprint, const FString& GraphNa
 		}
 	}
 
-	OutError = FString::Printf(TEXT("Graph '%s' not found in Blueprint '%s'"), *GraphName, *Blueprint->GetName());
+	// Search macros, event dispatcher signatures, interface graphs and collapsed sub-graphs
+	if (UEdGraph* SpecialGraph = FMCPCommonUtils::FindSpecialGraphByName(Blueprint, GraphName))
+	{
+		return SpecialGraph;
+	}
+
+	OutError = FString::Printf(
+		TEXT("Graph '%s' not found in Blueprint '%s'. Use get_blueprint_info (sections=[\"graphs\"]) to list available graph names."),
+		*GraphName, *Blueprint->GetName());
 	return nullptr;
 }
 
