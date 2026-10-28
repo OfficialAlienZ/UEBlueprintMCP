@@ -28,6 +28,7 @@ UEBlueprintMCP/
 │       │   ├── MCPContext.h         # Stateful editor context
 │       │   ├── MCPCommonUtils.h     # Shared utilities
 │       │   ├── MCPInspectionUtils.h # Shared read-only introspection helpers (curves, properties, actors, widgets)
+│       │   ├── MCPLogCapture.h      # Output Log ring buffer (FOutputDevice) for get_output_log
 │       │   └── Actions/             # Action class headers
 │       │       ├── EditorAction.h   # Base classes (FEditorAction hierarchy)
 │       │       ├── BlueprintActions.h
@@ -35,6 +36,7 @@ UEBlueprintMCP/
 │       │       ├── InspectionActions.h  # Read-only introspection (get_blueprint_info)
 │       │       ├── AIActions.h          # Behavior Tree / Blackboard introspection
 │       │       ├── AssetInspectionActions.h # Enum / Curve / Data Table introspection
+│       │       ├── PIEActions.h         # PIE start/stop/status, Output Log, console commands
 │       │       ├── NodeActions.h
 │       │       ├── ProjectActions.h
 │       │       ├── UMGActions.h
@@ -45,6 +47,7 @@ UEBlueprintMCP/
 │           ├── MCPContext.cpp       # Context state, auto-save
 │           ├── MCPCommonUtils.cpp   # Blueprint/asset resolution
 │           ├── MCPInspectionUtils.cpp
+│           ├── MCPLogCapture.cpp
 │           └── Actions/             # Action implementations
 │               ├── EditorAction.cpp # Base class + execution pipeline
 │               ├── BlueprintActions.cpp
@@ -52,6 +55,7 @@ UEBlueprintMCP/
 │               ├── InspectionActions.cpp
 │               ├── AIActions.cpp
 │               ├── AssetInspectionActions.cpp
+│               ├── PIEActions.cpp
 │               ├── NodeActions.cpp
 │               ├── ProjectActions.cpp
 │               ├── UMGActions.cpp
@@ -188,6 +192,7 @@ Error types should indicate the category:
 - `not_found` - Asset/node/pin doesn't exist
 - `execution_failed` - Operation threw exception
 - `crash_prevented` - SEH caught access violation
+- `pie_active` - Asset-modifying action rejected while Play-In-Editor runs (`BlocksDuringPIE()`, defaults to `RequiresSave()`)
 
 ### 5. Python Tool Docstrings
 

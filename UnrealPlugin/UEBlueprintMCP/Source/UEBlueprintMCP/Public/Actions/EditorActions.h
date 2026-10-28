@@ -179,4 +179,5 @@ protected:
 	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override { return true; }
 	virtual FString GetActionName() const override { return TEXT("save_all"); }
 	virtual bool RequiresSave() const override { return false; }
+	virtual bool BlocksDuringPIE() const override { return true; }
 };

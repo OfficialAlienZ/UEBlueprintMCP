@@ -1,6 +1,7 @@
 // Copyright (c) 2025 zolnoor. All rights reserved.
 
 #include "Actions/EditorAction.h"
+#include "Actions/PIEActions.h"
 #include "MCPCommonUtils.h"
 #include "Engine/Blueprint.h"
 #include "EdGraph/EdGraph.h"
@@ -21,6 +22,14 @@ TSharedPtr<FJsonObject> FEditorAction::Execute(const TSharedPtr<FJsonObject>& Pa
 	FString Error;
 
 	UE_LOG(LogTemp, Log, TEXT("UEBlueprintMCP: Action '%s' Execute started"), *GetActionName());
+
+	// Step 0: Asset-modifying actions are unsafe while Play-In-Editor is running or starting
+	if (BlocksDuringPIE() && FMCPPIE::IsActiveOrPending())
+	{
+		return CreateErrorResponse(
+			FString::Printf(TEXT("Action '%s' modifies or saves assets and is blocked while Play-In-Editor is running or starting. Call stop_pie first."), *GetActionName()),
+			TEXT("pie_active"));
+	}
 
 	// Step 1: Pre-validation
 	if (!Validate(Params, Context, Error))

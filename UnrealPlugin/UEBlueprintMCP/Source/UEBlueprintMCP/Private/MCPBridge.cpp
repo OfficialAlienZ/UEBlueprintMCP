@@ -8,6 +8,8 @@
 #include "Actions/InspectionActions.h"
 #include "Actions/AIActions.h"
 #include "Actions/AssetInspectionActions.h"
+#include "Actions/PIEActions.h"
+#include "MCPLogCapture.h"
 #include "Actions/NodeActions.h"
 #include "Actions/ProjectActions.h"
 #include "Actions/UMGActions.h"
@@ -36,6 +38,9 @@ void UMCPBridge::Initialize(FSubsystemCollectionBase& Collection)
 	// Register action handlers
 	RegisterActions();
 
+	// Capture the Output Log for get_output_log
+	FMCPLogCapture::Get().Start();
+
 	// Start the TCP server
 	Server = new FMCPServer(this, DefaultPort);
 	if (Server->Start())
@@ -62,6 +67,8 @@ void UMCPBridge::Deinitialize()
 
 	// Clear action handlers
 	ActionHandlers.Empty();
+
+	FMCPLogCapture::Get().Stop();
 
 	Super::Deinitialize();
 }
@@ -104,6 +111,15 @@ void UMCPBridge::RegisterActions()
 	ActionHandlers.Add(TEXT("get_viewport_transform"), MakeShared<FGetViewportTransformAction>());
 	ActionHandlers.Add(TEXT("set_viewport_transform"), MakeShared<FSetViewportTransformAction>());
 	ActionHandlers.Add(TEXT("save_all"), MakeShared<FSaveAllAction>());
+
+	// =========================================================================
+	// PIE / Runtime Feedback Actions
+	// =========================================================================
+	ActionHandlers.Add(TEXT("start_pie"), MakeShared<FStartPIEAction>());
+	ActionHandlers.Add(TEXT("stop_pie"), MakeShared<FStopPIEAction>());
+	ActionHandlers.Add(TEXT("get_pie_status"), MakeShared<FGetPIEStatusAction>());
+	ActionHandlers.Add(TEXT("get_output_log"), MakeShared<FGetOutputLogAction>());
+	ActionHandlers.Add(TEXT("execute_console_command"), MakeShared<FExecuteConsoleCommandAction>());
 
 	// =========================================================================
 	// Node Actions - Graph Operations

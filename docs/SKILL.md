@@ -32,6 +32,13 @@ This skill provides specialized knowledge for working with Unreal Engine Bluepri
 - `find_blueprint_nodes` / `get_node_pins` report `component_name` / `delegate_name` for component-bound events (e.g. OnComponentBeginOverlap).
 - `get_blueprint_info` - Parent class chain, interfaces, graph index, variables (type, default value, instance editable, replication, tooltip), functions (inputs/outputs/locals), macros, event dispatchers, events and custom events (custom events are callable like functions), components (hierarchy + properties changed from defaults, plus inherited), class defaults, timelines (length, loop, autoplay, float/vector/linear-color/event tracks with curve keys, tangents and extrapolation; Timeline nodes report `timeline_name` in `find_blueprint_nodes`), widget tree. Use `sections` to limit output, e.g. `["variables", "functions"]`. A called function whose `function_owner` (from `find_blueprint_nodes`) is a parent class is inherited, not local. Macros defined in a Macro Library Blueprint can be inspected by passing that Blueprint's name.
 
+### Play-In-Editor & Runtime Feedback
+- `start_pie` - Start Play-In-Editor (`simulate`, `clear_log`). Asynchronous: returns `state: starting` and a `log_cursor`; poll `get_pie_status` until `running`.
+- `stop_pie` / `get_pie_status` - Stop PIE; report `stopped` / `starting` / `running` (+ world, net mode, game time, paused, actor count) and `log_cursor`.
+- `get_output_log` - Read the captured Output Log (last 5000 lines). Params: `since_id` (use returned `next_id` for incremental reads), `limit`, `min_verbosity` (Error/Warning/Display/Log/Verbose), `categories`, `contains`, `include_mcp`, `clear`. `dropped` = lines lost since `since_id`; `truncated` = more matches than `limit`.
+- `execute_console_command` - Run a console command in the PIE world (or editor world). Params: `command`, `world` (auto/pie/editor). Output often goes to the Output Log; `quit`/`exit`/`crash`/`py` are rejected.
+- While PIE is running or starting, asset-modifying commands (including `compile_blueprint` and `save_all`) fail with `error_type: pie_active`; call `stop_pie` first. Read-only commands still work.
+
 ### Components
 - `add_component_to_blueprint` - Add StaticMeshComponent, BoxComponent, SphereComponent, SceneComponent, CameraComponent
 - `set_component_property` - Set properties on components

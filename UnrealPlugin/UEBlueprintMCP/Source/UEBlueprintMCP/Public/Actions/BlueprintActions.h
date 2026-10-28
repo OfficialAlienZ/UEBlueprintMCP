@@ -67,6 +67,7 @@ protected:
 	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
 	virtual FString GetActionName() const override { return TEXT("compile_blueprint"); }
 	virtual bool RequiresSave() const override { return false; } // We save explicitly on success
+	virtual bool BlocksDuringPIE() const override { return true; }
 
 private:
 	/** Collect compilation messages from nodes */

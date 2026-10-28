@@ -80,6 +80,12 @@ protected:
 	 */
 	virtual bool RequiresSave() const { return true; }
 
+	/**
+	 * Whether this action must be rejected while a Play-In-Editor session is running or starting.
+	 * Defaults to RequiresSave(): asset-modifying actions and auto-save are unsafe during PIE.
+	 */
+	virtual bool BlocksDuringPIE() const { return RequiresSave(); }
+
 	// =========================================================================
 	// Helper Methods
 	// =========================================================================

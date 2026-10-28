@@ -202,6 +202,76 @@ def get_tools() -> list[Tool]:
             description="Save all dirty packages (blueprints, levels, assets).",
             inputSchema={"type": "object", "properties": {}}
         ),
+
+        # Play-In-Editor and runtime feedback
+        Tool(
+            name="start_pie",
+            description=(
+                "Start a Play-In-Editor session. Returns immediately (state 'starting'); poll get_pie_status "
+                "until state is 'running'. Returns log_cursor, to pass as since_id to get_output_log to read "
+                "only what the session logs. While PIE runs or starts, asset-modifying commands (spawn, "
+                "set property, compile, save...) are rejected with error_type 'pie_active'; call stop_pie first."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "simulate": {"type": "boolean", "description": "Simulate In Editor instead of Play In Editor (default false)"},
+                    "clear_log": {"type": "boolean", "description": "Clear the captured Output Log before starting (default false)"}
+                }
+            }
+        ),
+        Tool(
+            name="stop_pie",
+            description="Stop the running Play-In-Editor session. Poll get_pie_status until state is 'stopped'.",
+            inputSchema={"type": "object", "properties": {}}
+        ),
+        Tool(
+            name="get_pie_status",
+            description=(
+                "Get Play-In-Editor state: 'stopped', 'starting' or 'running' (plus world, net_mode, time_seconds, "
+                "paused, actor_count while running) and the current log_cursor. If a start request never began, "
+                "a warning is returned."
+            ),
+            inputSchema={"type": "object", "properties": {}}
+        ),
+        Tool(
+            name="get_output_log",
+            description=(
+                "Read captured Unreal Output Log lines (ring buffer of the last 5000 lines). Without since_id "
+                "returns the most recent matching lines; with since_id returns newer lines oldest-first. "
+                "Pass the returned next_id as since_id on the next call to read incrementally. "
+                "dropped=true means lines were lost between since_id and the buffer start; "
+                "truncated=true means more matches exist than limit."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "since_id": {"type": "integer", "description": "Only entries with id greater than this (use next_id from a previous call)"},
+                    "limit": {"type": "integer", "description": "Max entries to return (default 200, max 1000)"},
+                    "min_verbosity": {"type": "string", "enum": ["Error", "Warning", "Display", "Log", "Verbose", "VeryVerbose"], "description": "Include this severity or worse (default Log)"},
+                    "categories": {"type": "array", "items": {"type": "string"}, "description": "Only these log categories, e.g. [\"LogBlueprintUserMessages\", \"LogTemp\"]"},
+                    "contains": {"type": "string", "description": "Case-insensitive substring filter on the message"},
+                    "include_mcp": {"type": "boolean", "description": "Include this plugin's own 'UEBlueprintMCP:' lines (default false)"},
+                    "clear": {"type": "boolean", "description": "Clear the buffer after reading (default false)"}
+                }
+            }
+        ),
+        Tool(
+            name="execute_console_command",
+            description=(
+                "Run a console command in the PIE world (if running) or the editor world, e.g. 'stat fps', "
+                "'ke * MyEvent', 'slomo 0.5'. Returns handled and any direct output; many commands write to the "
+                "Output Log instead, so follow up with get_output_log. quit/exit/crash/py are rejected."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "command": {"type": "string", "description": "Console command to execute"},
+                    "world": {"type": "string", "enum": ["auto", "pie", "editor"], "description": "Target world (default auto: PIE if running, else editor)"}
+                },
+                "required": ["command"]
+            }
+        ),
     ]
 
 
@@ -219,6 +289,11 @@ TOOL_HANDLERS = {
     "get_viewport_transform": "get_viewport_transform",
     "set_viewport_transform": "set_viewport_transform",
     "save_all": "save_all",
+    "start_pie": "start_pie",
+    "stop_pie": "stop_pie",
+    "get_pie_status": "get_pie_status",
+    "get_output_log": "get_output_log",
+    "execute_console_command": "execute_console_command",
 }
 
 

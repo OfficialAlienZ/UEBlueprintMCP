@@ -13,6 +13,7 @@
 #include "Misc/PackageName.h"
 #include "Logging/TokenizedMessage.h"
 #include "FileHelpers.h"
+#include "Editor.h"
 #include "EdGraphSchema_K2.h"
 #include "Materials/Material.h"
 #include "AssetRegistry/AssetRegistryModule.h"
@@ -119,6 +120,14 @@ namespace MCPCompat
 #else
 		return FindObject<UEnum>(ANY_PACKAGE, *Name, true);
 #endif
+	}
+
+	/** Queue a Play-In-Editor / Simulate session (starts on the next editor tick). Same API in UE 4.25+ and 5.x. */
+	inline void RequestPlaySession(bool bSimulate)
+	{
+		FRequestPlaySessionParams Params;
+		Params.WorldType = bSimulate ? EPlaySessionWorldType::SimulateInEditor : EPlaySessionWorldType::PlayInEditor;
+		GEditor->RequestPlaySession(Params);
 	}
 
 	/** Add a class to an asset registry filter. */
