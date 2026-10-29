@@ -25,6 +25,17 @@ public:
 	/** Editable properties of Object whose value differs from Baseline (name -> exported text). */
 	static TSharedPtr<FJsonObject> ChangedProperties(UObject* Object, UObject* Baseline, const UClass* ExcludeOwner = nullptr);
 
+	/**
+	 * Every reflected property (UPROPERTY) of Object as name -> exported text, like the editor's Export Text
+	 * (nothing is skipped because it equals the default). Deprecated properties and multicast delegates are omitted;
+	 * fixed-size arrays are exported as a JSON array.
+	 *
+	 * @param NameFilter   If not empty, only these properties (case-insensitive)
+	 * @param bEditableOnly Only properties exposed to the editor (CPF_Edit)
+	 * @param OutUnknown   Receives the NameFilter entries that match no property of the class
+	 */
+	static TSharedPtr<FJsonObject> ExportAllProperties(UObject* Object, const TArray<FString>& NameFilter, bool bEditableOnly, TArray<FString>* OutUnknown = nullptr);
+
 	/** Curve as JSON: keys (time/value/interp/tangents) plus pre/post extrapolation. */
 	static TSharedPtr<FJsonObject> RichCurveToJson(const FRichCurve& Curve);
 	static TSharedPtr<FJsonObject> SimpleCurveToJson(const FSimpleCurve& Curve);

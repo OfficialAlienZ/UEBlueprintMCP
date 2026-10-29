@@ -89,7 +89,14 @@ protected:
 
 /**
  * FGetActorPropertiesAction
- * Gets all properties of an actor.
+ * Gets an actor's level placement (components, overrides) and, on request, all its reflected properties.
+ *
+ * Parameters:
+ *   - name: Actor name (e.g. "WorldSettings" for the level's World Settings)
+ *   - include_properties (optional, default true): changed component/actor properties
+ *   - include_all_properties (optional, default false): add "all_properties" with every UPROPERTY as Export Text
+ *   - property_names (optional): only these properties in "all_properties" (implies include_all_properties)
+ *   - editable_only (optional, default false): restrict "all_properties" to editor-exposed properties
  */
 class UEBLUEPRINTMCP_API FGetActorPropertiesAction : public FEditorAction
 {

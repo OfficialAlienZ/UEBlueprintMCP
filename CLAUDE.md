@@ -36,6 +36,7 @@ UEBlueprintMCP/
 │       │       ├── InspectionActions.h  # Read-only introspection (get_blueprint_info)
 │       │       ├── AIActions.h          # Behavior Tree / Blackboard introspection
 │       │       ├── AssetInspectionActions.h # Enum / Curve / Data Table introspection
+│       │       ├── ObjectInspectionActions.h # get_object_properties (full UPROPERTY export), get_project_config (ini)
 │       │       ├── PIEActions.h         # PIE start/stop/status, Output Log, console commands
 │       │       ├── NodeActions.h
 │       │       ├── ProjectActions.h
@@ -55,6 +56,7 @@ UEBlueprintMCP/
 │               ├── InspectionActions.cpp
 │               ├── AIActions.cpp
 │               ├── AssetInspectionActions.cpp
+│               ├── ObjectInspectionActions.cpp
 │               ├── PIEActions.cpp
 │               ├── NodeActions.cpp
 │               ├── ProjectActions.cpp

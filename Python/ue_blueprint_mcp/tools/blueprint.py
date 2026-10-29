@@ -61,12 +61,13 @@ def get_tools() -> list[Tool]:
                 "curve keys) and widget tree. Use it to document a Blueprint or to find out whether a "
                 "called function is local, a custom event, or inherited. Graph names returned here can be "
                 "passed as graph_name to find_blueprint_nodes / get_node_pins (works for functions, macros, "
-                "dispatcher signatures and collapsed graphs)."
+                "dispatcher signatures and collapsed graphs). A map's Level Blueprint is addressed as "
+                "'level:<Map>' (map short name or full path, e.g. 'level:<MapName>' or 'level:/Game/<Path>/<MapName>'; 'level:' = the open map)."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "blueprint_name": {"type": "string", "description": "Blueprint name or full asset path (e.g. /Game/Folder/BP_Name)"},
+                    "blueprint_name": {"type": "string", "description": "Blueprint name or full asset path (e.g. /Game/Folder/BP_Name), or 'level:<Map>' for a Level Blueprint"},
                     "sections": {
                         "type": "array",
                         "items": {
@@ -157,6 +158,55 @@ def get_tools() -> list[Tool]:
                     "limit": {"type": "integer", "description": "Max rows to return (default 200)"}
                 },
                 "required": ["table_name"]
+            }
+        ),
+        Tool(
+            name="get_object_properties",
+            description=(
+                "Read-only export of EVERY reflected property (UPROPERTY) of an object as Export Text, like the "
+                "editor's Details panel copy. Getter counterpart of set_actor_property / set_blueprint_property. "
+                "Targets (exactly one): object_path (full path, e.g. /Script/EngineSettings.Default__GameMapsSettings "
+                "or an asset path; the shortcut 'world_settings' is the open level's World Settings with "
+                "DefaultGameMode etc.), actor_name (placed actor, optionally component_name) or blueprint_name "
+                "(class default object, optionally a component template via component_name; accepts 'level:<MapName>'). "
+                "Use property_names to fetch only some properties."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "object_path": {"type": "string", "description": "Full object path, or 'world_settings'"},
+                    "actor_name": {"type": "string", "description": "Actor in the open level"},
+                    "blueprint_name": {"type": "string", "description": "Blueprint name/path or 'level:<Map>'; exports its class defaults"},
+                    "component_name": {"type": "string", "description": "Component of actor_name / blueprint_name"},
+                    "property_names": {"type": "array", "items": {"type": "string"}, "description": "Only these properties (case-insensitive)"},
+                    "editable_only": {"type": "boolean", "description": "Only editor-exposed properties (default false)"}
+                }
+            }
+        ),
+        Tool(
+            name="get_project_config",
+            description=(
+                "Read-only access to the project's ini configuration. Example: default map = file 'Engine', "
+                "section '/Script/EngineSettings.GameMapsSettings', key 'GameDefaultMap' (also EditorStartupMap, "
+                "GlobalDefaultGameMode). Without 'section' lists the section names (filter with 'contains'); without "
+                "'key' returns every key of the section; repeated keys (+Array=...) are returned as arrays. "
+                "layer 'merged' (default) is the config as the editor sees it; 'project_default' is the raw "
+                "Config/Default<File>.ini with its +/-/. operators."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "file": {
+                        "type": "string",
+                        "enum": ["Engine", "Game", "Input", "Editor", "EditorPerProjectUserSettings", "GameUserSettings", "Scalability"],
+                        "description": "Config file (Engine = DefaultEngine.ini, ...)"
+                    },
+                    "section": {"type": "string", "description": "Section name, e.g. /Script/EngineSettings.GameMapsSettings"},
+                    "key": {"type": "string", "description": "Key inside the section, e.g. GameDefaultMap"},
+                    "layer": {"type": "string", "enum": ["merged", "project_default"], "description": "Default merged"},
+                    "contains": {"type": "string", "description": "When listing sections, only names containing this text"}
+                },
+                "required": ["file"]
             }
         ),
         Tool(
@@ -278,6 +328,8 @@ TOOL_HANDLERS = {
     "get_enum_info": "get_enum_info",
     "get_curve_info": "get_curve_info",
     "get_data_table_info": "get_data_table_info",
+    "get_object_properties": "get_object_properties",
+    "get_project_config": "get_project_config",
     "set_blueprint_property": "set_blueprint_property",
     "add_component_to_blueprint": "add_component_to_blueprint",
     "set_static_mesh_properties": "set_static_mesh_properties",

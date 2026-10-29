@@ -140,13 +140,18 @@ def get_tools() -> list[Tool]:
             description=(
                 "Get an actor's level placement: name, label, class (and Blueprint path), level, folder, tags, "
                 "transform, attachment, every component (class, creation method, attachment, relative transform, "
-                "properties changed from the archetype) and the actor properties overridden from the class defaults."
+                "properties changed from the archetype) and the actor properties overridden from the class defaults. "
+                "With include_all_properties (or property_names) also returns all_properties: every reflected "
+                "property as Export Text. Use name 'WorldSettings' for the level's World Settings (DefaultGameMode, ...)."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "name": {"type": "string", "description": "Name of the actor"},
-                    "include_properties": {"type": "boolean", "description": "Include changed component/actor properties (default true)"}
+                    "include_properties": {"type": "boolean", "description": "Include changed component/actor properties (default true)"},
+                    "include_all_properties": {"type": "boolean", "description": "Add all_properties with every UPROPERTY as Export Text (default false)"},
+                    "property_names": {"type": "array", "items": {"type": "string"}, "description": "Only these properties in all_properties (implies include_all_properties)"},
+                    "editable_only": {"type": "boolean", "description": "Restrict all_properties to editor-exposed properties (default false)"}
                 },
                 "required": ["name"]
             }

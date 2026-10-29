@@ -8,6 +8,7 @@
 #include "Actions/InspectionActions.h"
 #include "Actions/AIActions.h"
 #include "Actions/AssetInspectionActions.h"
+#include "Actions/ObjectInspectionActions.h"
 #include "Actions/PIEActions.h"
 #include "MCPLogCapture.h"
 #include "Actions/NodeActions.h"
@@ -96,6 +97,8 @@ void UMCPBridge::RegisterActions()
 	ActionHandlers.Add(TEXT("get_enum_info"), MakeShared<FGetEnumInfoAction>());
 	ActionHandlers.Add(TEXT("get_curve_info"), MakeShared<FGetCurveInfoAction>());
 	ActionHandlers.Add(TEXT("get_data_table_info"), MakeShared<FGetDataTableInfoAction>());
+	ActionHandlers.Add(TEXT("get_object_properties"), MakeShared<FGetObjectPropertiesAction>());
+	ActionHandlers.Add(TEXT("get_project_config"), MakeShared<FGetProjectConfigAction>());
 
 	// =========================================================================
 	// Editor Actions (actors, viewport, save)

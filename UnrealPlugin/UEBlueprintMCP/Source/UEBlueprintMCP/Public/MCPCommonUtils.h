@@ -44,8 +44,18 @@ public:
 	// Blueprint Utilities
 	// =========================================================================
 
-	/** Find a Blueprint by name (searches /Game/Blueprints/) */
+	/**
+	 * Find a Blueprint by short name, full asset path (/Game/Folder/BP_Name) or Level Blueprint
+	 * ("level:<MapName>", "level:/Game/<Path>/<MapName>", "level:" for the open map).
+	 */
 	static UBlueprint* FindBlueprint(const FString& BlueprintName);
+
+	/**
+	 * Find the Level (Script) Blueprint of a map: a loaded level of the editor world (persistent or
+	 * streaming), or a map asset that is loaded on demand. Empty / "current" = the open map.
+	 * Returns null if the map is unknown or has no Level Blueprint yet (it is created by opening it in the editor).
+	 */
+	static UBlueprint* FindLevelScriptBlueprint(const FString& MapName);
 
 	/** Find or create the event graph for a Blueprint */
 	static UEdGraph* FindOrCreateEventGraph(UBlueprint* Blueprint);

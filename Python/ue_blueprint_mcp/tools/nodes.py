@@ -389,12 +389,15 @@ def get_tools() -> list[Tool]:
                 "Find nodes in a graph (event graph, function, macro, dispatcher signature or collapsed graph). "
                 "Basic detail returns guid, class, title, position, comment and function/variable/event/macro info "
                 "(function_owner shows where a called function lives). detail='full' also returns every pin with "
-                "default values and linked_to connections, which is enough to trace execution flow."
+                "default values and linked_to connections, which is enough to trace execution flow. "
+                "Nodes with class pins (Get Actor Of Class, Spawn Actor From Class, Create Widget) report "
+                "class_pins: pin name -> class / class_path (the pin's default class) and is_linked. "
+                "blueprint_name 'level:<Map>' (any map name or path, 'level:' = open map) targets the map's Level Blueprint."
             ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
+                    "blueprint_name": {"type": "string", "description": "Blueprint name/path, or 'level:<Map>' for a Level Blueprint"},
                     "graph_name": {"type": "string", "description": "Graph name (defaults to event graph). See get_blueprint_info 'graphs'."},
                     "node_type": {"type": "string", "description": "Filter: Event, Function, Variable, Macro, Cast, Comment, All (default All)"},
                     "event_name": {"type": "string", "description": "With node_type=Event: specific event (ReceiveBeginPlay, custom event name, ...)"},

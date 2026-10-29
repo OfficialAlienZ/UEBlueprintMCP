@@ -5,6 +5,9 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
+#include "Engine/Level.h"
+#include "Engine/LevelScriptBlueprint.h"
+#include "Engine/World.h"
 #include "Engine/SimpleConstructionScript.h"
 #include "Engine/SCS_Node.h"
 #include "EdGraph/EdGraph.h"
@@ -94,9 +97,95 @@ FVector2D FMCPCommonUtils::GetVector2DFromJson(const TSharedPtr<FJsonObject>& Js
 // Blueprint Utilities
 // =========================================================================
 
+namespace
+{
+	/** Map name of a level: package short name, without a trailing "_C" (the Level Blueprint's generated class is <Map>_C). */
+	FString CommonUtils_NormalizeMapName(const FString& MapName)
+	{
+		FString Name = MapName.TrimStartAndEnd();
+		if (Name.EndsWith(TEXT("_C")))
+		{
+			Name.LeftChopInline(2);
+		}
+		return Name;
+	}
+
+	bool CommonUtils_LevelMatches(const ULevel* Level, const FString& Name)
+	{
+		if (!Level || !Level->GetOutermost())
+		{
+			return false;
+		}
+		const FString PackageName = Level->GetOutermost()->GetName();
+		return PackageName.Equals(Name, ESearchCase::IgnoreCase)
+			|| FPackageName::GetShortName(PackageName).Equals(Name, ESearchCase::IgnoreCase);
+	}
+}
+
+UBlueprint* FMCPCommonUtils::FindLevelScriptBlueprint(const FString& MapName)
+{
+	const FString Name = CommonUtils_NormalizeMapName(MapName);
+	const bool bCurrent = Name.IsEmpty() || Name.Equals(TEXT("current"), ESearchCase::IgnoreCase);
+
+	// 1. Levels loaded in the editor world (persistent level and streaming sub-levels).
+	UWorld* EditorWorld = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	if (EditorWorld)
+	{
+		if (bCurrent)
+		{
+			return EditorWorld->PersistentLevel ? EditorWorld->PersistentLevel->GetLevelScriptBlueprint(true) : nullptr;
+		}
+		for (ULevel* Level : EditorWorld->GetLevels())
+		{
+			if (CommonUtils_LevelMatches(Level, Name))
+			{
+				return Level->GetLevelScriptBlueprint(true);
+			}
+		}
+	}
+	if (bCurrent)
+	{
+		return nullptr;
+	}
+
+	// 2. Map asset that is not loaded in the editor: load its package and read the persistent level's script.
+	UWorld* MapWorld = nullptr;
+	if (Name.StartsWith(TEXT("/")))
+	{
+		FString ObjectPath = Name;
+		if (!ObjectPath.Contains(TEXT(".")))
+		{
+			ObjectPath = ObjectPath + TEXT(".") + FPackageName::GetShortName(Name);
+		}
+		MapWorld = LoadObject<UWorld>(nullptr, *ObjectPath, nullptr, LOAD_NoWarn);
+	}
+	else
+	{
+		FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+		TArray<FAssetData> AssetList;
+		MCPCompat::GetAssetsByClass(AssetRegistryModule.Get(), UWorld::StaticClass(), AssetList);
+		for (const FAssetData& AssetData : AssetList)
+		{
+			if (AssetData.AssetName.ToString().Equals(Name, ESearchCase::IgnoreCase))
+			{
+				MapWorld = Cast<UWorld>(AssetData.GetAsset());
+				break;
+			}
+		}
+	}
+	return (MapWorld && MapWorld->PersistentLevel) ? MapWorld->PersistentLevel->GetLevelScriptBlueprint(true) : nullptr;
+}
+
 UBlueprint* FMCPCommonUtils::FindBlueprint(const FString& BlueprintName)
 {
 	if (BlueprintName.IsEmpty()) return nullptr;
+
+	// Level Blueprint: "level:<MapName>", "level:/Game/<Path>/<MapName>" or "level:" / "level:current" for the open map.
+	static const FString LevelPrefix(TEXT("level:"));
+	if (BlueprintName.StartsWith(LevelPrefix, ESearchCase::IgnoreCase))
+	{
+		return FindLevelScriptBlueprint(BlueprintName.Mid(LevelPrefix.Len()));
+	}
 
 	// Fast path: full asset path ("/Game/Folder/BP_Name" or "/Game/Folder/BP_Name.BP_Name").
 	// Unambiguous and skips the Asset Registry scan entirely.
@@ -470,6 +559,44 @@ TSharedPtr<FJsonObject> FMCPCommonUtils::NodeToJson(UEdGraphNode* Node, bool bIn
 	{
 		// Curves/keys are available via get_blueprint_info sections=["timelines"].
 		NodeObj->SetStringField(TEXT("timeline_name"), TimelineNode->TimelineName.ToString());
+	}
+
+	// Class-valued input pins (Get Actor Of Class, Spawn Actor From Class, Create Widget, ...):
+	// reported even without pins so the class a node works on is visible in the basic dump.
+	TSharedPtr<FJsonObject> ClassPins = MakeShared<FJsonObject>();
+	for (const UEdGraphPin* Pin : Node->Pins)
+	{
+		if (!Pin || Pin->Direction != EGPD_Input)
+		{
+			continue;
+		}
+		const FName Category = Pin->PinType.PinCategory;
+		if (Category != UEdGraphSchema_K2::PC_Class && Category != UEdGraphSchema_K2::PC_SoftClass)
+		{
+			continue;
+		}
+
+		TSharedPtr<FJsonObject> Entry = MakeShared<FJsonObject>();
+		Entry->SetBoolField(TEXT("is_linked"), Pin->LinkedTo.Num() > 0);
+		if (Pin->DefaultObject)
+		{
+			Entry->SetStringField(TEXT("class"), Pin->DefaultObject->GetName());
+			Entry->SetStringField(TEXT("class_path"), Pin->DefaultObject->GetPathName());
+		}
+		else if (!Pin->DefaultValue.IsEmpty())
+		{
+			// Soft class references keep their path in the default value.
+			Entry->SetStringField(TEXT("class_path"), Pin->DefaultValue);
+		}
+		if (const UObject* BaseClass = Pin->PinType.PinSubCategoryObject.Get())
+		{
+			Entry->SetStringField(TEXT("base_class"), BaseClass->GetName());
+		}
+		ClassPins->SetObjectField(Pin->PinName.ToString(), Entry);
+	}
+	if (ClassPins->Values.Num() > 0)
+	{
+		NodeObj->SetObjectField(TEXT("class_pins"), ClassPins);
 	}
 
 	if (bIncludePins)

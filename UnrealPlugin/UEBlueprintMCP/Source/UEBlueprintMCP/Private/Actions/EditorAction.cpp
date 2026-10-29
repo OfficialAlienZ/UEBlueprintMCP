@@ -179,7 +179,9 @@ UBlueprint* FEditorAction::FindBlueprint(const FString& BlueprintName, FString& 
 	UBlueprint* BP = FMCPCommonUtils::FindBlueprint(BlueprintName);
 	if (!BP)
 	{
-		OutError = FString::Printf(TEXT("Blueprint '%s' not found"), *BlueprintName);
+		OutError = BlueprintName.StartsWith(TEXT("level:"), ESearchCase::IgnoreCase)
+			? FString::Printf(TEXT("Level Blueprint '%s' not found. Use 'level:<MapName>' or 'level:/Game/Path/Map' for an existing map (or 'level:' for the open map); the map must already have a Level Blueprint."), *BlueprintName)
+			: FString::Printf(TEXT("Blueprint '%s' not found"), *BlueprintName);
 	}
 	return BP;
 }
@@ -278,7 +280,9 @@ bool FBlueprintAction::ValidateBlueprint(const TSharedPtr<FJsonObject>& Params, 
 	{
 		OutError = BlueprintName.IsEmpty()
 			? TEXT("No current Blueprint set and no blueprint_name provided")
-			: FString::Printf(TEXT("Blueprint '%s' not found"), *BlueprintName);
+			: BlueprintName.StartsWith(TEXT("level:"), ESearchCase::IgnoreCase)
+				? FString::Printf(TEXT("Level Blueprint '%s' not found. Use 'level:<MapName>' or 'level:/Game/Path/Map' for an existing map (or 'level:' for the open map); the map must already have a Level Blueprint."), *BlueprintName)
+				: FString::Printf(TEXT("Blueprint '%s' not found"), *BlueprintName);
 		return false;
 	}
 

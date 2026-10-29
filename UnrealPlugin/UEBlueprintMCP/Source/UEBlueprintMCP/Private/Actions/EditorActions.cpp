@@ -443,6 +443,31 @@ TSharedPtr<FJsonObject> FGetActorPropertiesAction::ExecuteInternal(const TShared
 
 	TSharedPtr<FJsonObject> Result = FMCPCommonUtils::ActorToJsonObject(Actor);
 	MergeJsonFields(Result, FMCPInspectionUtils::ActorDetailsToJson(Actor, GetOptionalBool(Params, TEXT("include_properties"), true)));
+
+	// Every reflected property (Export Text), e.g. WorldSettings.DefaultGameMode.
+	TArray<FString> PropertyNames;
+	if (const TArray<TSharedPtr<FJsonValue>>* Names = GetOptionalArray(Params, TEXT("property_names")))
+	{
+		for (const TSharedPtr<FJsonValue>& Value : *Names)
+		{
+			PropertyNames.Add(Value->AsString());
+		}
+	}
+	if (GetOptionalBool(Params, TEXT("include_all_properties"), false) || PropertyNames.Num() > 0)
+	{
+		TArray<FString> Unknown;
+		Result->SetObjectField(TEXT("all_properties"),
+			FMCPInspectionUtils::ExportAllProperties(Actor, PropertyNames, GetOptionalBool(Params, TEXT("editable_only"), false), &Unknown));
+		if (Unknown.Num() > 0)
+		{
+			TArray<TSharedPtr<FJsonValue>> UnknownValues;
+			for (const FString& Name : Unknown)
+			{
+				UnknownValues.Add(MakeShared<FJsonValueString>(Name));
+			}
+			Result->SetArrayField(TEXT("unknown_properties"), UnknownValues);
+		}
+	}
 	return CreateSuccessResponse(Result);
 }
 

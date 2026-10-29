@@ -181,6 +181,65 @@ TSharedPtr<FJsonObject> FMCPInspectionUtils::ChangedProperties(UObject* Object, 
 	return Result;
 }
 
+TSharedPtr<FJsonObject> FMCPInspectionUtils::ExportAllProperties(UObject* Object, const TArray<FString>& NameFilter, bool bEditableOnly, TArray<FString>* OutUnknown)
+{
+	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+	if (!Object)
+	{
+		return Result;
+	}
+
+	const UClass* Class = Object->GetClass();
+	TSet<FString> Wanted;
+	for (const FString& Name : NameFilter)
+	{
+		Wanted.Add(Name.ToLower());
+		if (OutUnknown && !Class->FindPropertyByName(FName(*Name)))
+		{
+			OutUnknown->Add(Name);
+		}
+	}
+
+	for (TFieldIterator<FProperty> It(Class); It; ++It)
+	{
+		const FProperty* Property = *It;
+		if (Property->HasAnyPropertyFlags(CPF_Deprecated))
+		{
+			continue;
+		}
+		if (bEditableOnly && !Property->HasAnyPropertyFlags(CPF_Edit))
+		{
+			continue;
+		}
+		if (CastField<FMulticastDelegateProperty>(Property))
+		{
+			continue;
+		}
+		if (Wanted.Num() > 0 && !Wanted.Contains(Property->GetName().ToLower()))
+		{
+			continue;
+		}
+
+		if (Property->ArrayDim > 1)
+		{
+			FInspectJsonArray Elements;
+			for (int32 Index = 0; Index < Property->ArrayDim; ++Index)
+			{
+				FString Text;
+				Property->ExportText_InContainer(Index, Text, Object, nullptr, nullptr, PPF_None);
+				Elements.Add(MakeShared<FJsonValueString>(Text));
+			}
+			Result->SetArrayField(Property->GetName(), Elements);
+			continue;
+		}
+
+		FString Text;
+		Property->ExportText_InContainer(0, Text, Object, nullptr, nullptr, PPF_None);
+		Result->SetStringField(Property->GetName(), Text);
+	}
+	return Result;
+}
+
 TSharedPtr<FJsonObject> FMCPInspectionUtils::RichCurveToJson(const FRichCurve& Curve)
 {
 	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
