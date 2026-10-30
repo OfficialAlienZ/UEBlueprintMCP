@@ -7,7 +7,12 @@
 #include "Curves/SimpleCurve.h"
 #include "Engine/Blueprint.h"
 #include "Engine/UserDefinedEnum.h"
+// UE 5.8 moved UserDefinedStruct to CoreUObject
+#if __has_include("StructUtils/UserDefinedStruct.h")
+#include "StructUtils/UserDefinedStruct.h"
+#else
 #include "Engine/UserDefinedStruct.h"
+#endif
 #include "GameFramework/Actor.h"
 #include "Components/ActorComponent.h"
 #include "Components/SceneComponent.h"
