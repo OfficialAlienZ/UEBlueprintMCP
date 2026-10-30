@@ -28,6 +28,15 @@
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "GameFramework/Actor.h"
+#include "GameFramework/GameModeBase.h"
+#include "GameFramework/GameStateBase.h"
+#include "GameFramework/HUD.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerState.h"
+#include "Engine/LevelScriptActor.h"
+#include "EngineUtils.h"
+#include "Kismet/GameplayStatics.h"
 #include "EditorAssetLibrary.h"
 
 // =========================================================================
@@ -942,6 +951,52 @@ TSharedPtr<FJsonObject> FMCPCommonUtils::CreateErrorResponse(const FString& Erro
 // =========================================================================
 // Actor Utilities
 // =========================================================================
+
+AActor* FMCPCommonUtils::FindActor(UWorld* World, const FString& NameOrAlias)
+{
+	if (!World || NameOrAlias.IsEmpty())
+	{
+		return nullptr;
+	}
+
+	if (NameOrAlias.StartsWith(TEXT("@")))
+	{
+		if (!World->IsGameWorld())
+		{
+			return nullptr;
+		}
+		const FString Alias = NameOrAlias.Mid(1).ToLower();
+		APlayerController* PlayerController = UGameplayStatics::GetPlayerController(World, 0);
+
+		if (Alias == TEXT("player_controller")) return PlayerController;
+		if (Alias == TEXT("player_pawn")) return PlayerController ? PlayerController->GetPawn() : nullptr;
+		if (Alias == TEXT("player_state")) return PlayerController ? PlayerController->PlayerState : nullptr;
+		if (Alias == TEXT("hud")) return PlayerController ? PlayerController->GetHUD() : nullptr;
+		if (Alias == TEXT("game_mode")) return World->GetAuthGameMode();
+		if (Alias == TEXT("game_state")) return World->GetGameState();
+		if (Alias == TEXT("level_script")) return World->GetLevelScriptActor();
+		return nullptr;
+	}
+
+	AActor* LabelMatch = nullptr;
+	for (TActorIterator<AActor> It(World); It; ++It)
+	{
+		AActor* Actor = *It;
+		if (!Actor)
+		{
+			continue;
+		}
+		if (Actor->GetName() == NameOrAlias)
+		{
+			return Actor;
+		}
+		if (!LabelMatch && Actor->GetActorLabel() == NameOrAlias)
+		{
+			LabelMatch = Actor;
+		}
+	}
+	return LabelMatch;
+}
 
 TSharedPtr<FJsonObject> FMCPCommonUtils::ActorToJsonObject(AActor* Actor)
 {

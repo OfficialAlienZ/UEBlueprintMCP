@@ -7,6 +7,8 @@
 #include "../MCPContext.h"
 #include "../MCPCompat.h"
 
+class UWorld;
+
 /**
  * FEditorAction
  *
@@ -113,6 +115,24 @@ protected:
 
 	/** Get optional bool parameter with default */
 	bool GetOptionalBool(const TSharedPtr<FJsonObject>& Params, const FString& ParamName, bool Default = false) const;
+
+	/**
+	 * Resolve the optional "world" parameter: "editor" (default), "pie" (the running Play-In-Editor world)
+	 * or "auto" (PIE if running, else editor). Returns null and sets OutError if the value is invalid,
+	 * "pie" is requested while no PIE session runs, or no world is loaded.
+	 *
+	 * @param bOutIsPIE Receives whether the returned world is the PIE world
+	 */
+	UWorld* ResolveWorld(const TSharedPtr<FJsonObject>& Params, FString& OutError, bool* bOutIsPIE = nullptr) const;
+
+	/** Validate() helper: true if the "world" parameter resolves (see ResolveWorld). */
+	bool ValidateWorldParam(const TSharedPtr<FJsonObject>& Params, FString& OutError) const;
+
+	/**
+	 * Validate() helper for actions that edit the level and also support world "pie" (BlocksDuringPIE() false).
+	 * The editor level stays protected while PIE runs or starts; only the PIE world may be edited then.
+	 */
+	bool ValidateEditableWorldParam(const TSharedPtr<FJsonObject>& Params, FString& OutError) const;
 
 	/** Find Blueprint by name */
 	UBlueprint* FindBlueprint(const FString& BlueprintName, FString& OutError) const;

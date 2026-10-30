@@ -6,6 +6,8 @@
 #include "Editor.h"
 #include "Engine/Engine.h"
 #include "Engine/World.h"
+#include "GameFramework/Pawn.h"
+#include "GameFramework/PlayerController.h"
 #include "HAL/PlatformTime.h"
 #include "Misc/OutputDevice.h"
 
@@ -217,6 +219,23 @@ TSharedPtr<FJsonObject> FGetPIEStatusAction::ExecuteInternal(const TSharedPtr<FJ
 		Result->SetNumberField(TEXT("time_seconds"), PlayWorld->GetTimeSeconds());
 		Result->SetBoolField(TEXT("paused"), PlayWorld->IsPaused());
 		Result->SetNumberField(TEXT("actor_count"), PlayWorld->GetActorCount());
+
+		if (APlayerController* PC = PlayWorld->GetFirstPlayerController())
+		{
+			TSharedPtr<FJsonObject> Player = MakeShared<FJsonObject>();
+			Player->SetStringField(TEXT("controller"), PC->GetName());
+			Player->SetStringField(TEXT("controller_class"), PC->GetClass()->GetName());
+			if (APawn* Pawn = PC->GetPawn())
+			{
+				Player->SetStringField(TEXT("pawn"), Pawn->GetName());
+				Player->SetStringField(TEXT("pawn_class"), Pawn->GetClass()->GetName());
+				const FVector Location = Pawn->GetActorLocation();
+				Player->SetArrayField(TEXT("pawn_location"), TArray<TSharedPtr<FJsonValue>>{
+					MakeShared<FJsonValueNumber>(Location.X), MakeShared<FJsonValueNumber>(Location.Y), MakeShared<FJsonValueNumber>(Location.Z)});
+			}
+			Player->SetBoolField(TEXT("input_ignored"), PC->IsMoveInputIgnored() && PC->IsLookInputIgnored());
+			Result->SetObjectField(TEXT("player"), Player);
+		}
 	}
 	else if (FMCPPIE::IsStartPending())
 	{

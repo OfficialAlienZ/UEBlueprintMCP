@@ -167,7 +167,9 @@ UObject* FGetObjectPropertiesAction::ResolveTarget(const TSharedPtr<FJsonObject>
 		return nullptr;
 	}
 
-	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	// Only the actor / world_settings targets need a world; a bad "world" value is reported for those.
+	FString WorldError;
+	UWorld* World = ResolveWorld(Params, WorldError);
 
 	// ---- Blueprint class defaults / component template ----
 	if (!BlueprintName.IsEmpty())
@@ -210,19 +212,10 @@ UObject* FGetObjectPropertiesAction::ResolveTarget(const TSharedPtr<FJsonObject>
 	{
 		if (!World)
 		{
-			OutError = TEXT("No editor world available");
+			OutError = WorldError;
 			return nullptr;
 		}
-		AActor* Found = nullptr;
-		for (TActorIterator<AActor> It(World); It; ++It)
-		{
-			AActor* Actor = *It;
-			if (Actor && (Actor->GetName() == ActorName || Actor->GetActorLabel() == ActorName))
-			{
-				Found = Actor;
-				break;
-			}
-		}
+		AActor* Found = FMCPCommonUtils::FindActor(World, ActorName);
 		if (!Found)
 		{
 			OutError = FString::Printf(TEXT("Actor not found: %s"), *ActorName);
@@ -246,7 +239,7 @@ UObject* FGetObjectPropertiesAction::ResolveTarget(const TSharedPtr<FJsonObject>
 		AWorldSettings* Settings = World ? World->GetWorldSettings() : nullptr;
 		if (!Settings)
 		{
-			OutError = TEXT("No editor world available");
+			OutError = WorldError.IsEmpty() ? FString(TEXT("World settings are not available")) : WorldError;
 		}
 		return Settings;
 	}

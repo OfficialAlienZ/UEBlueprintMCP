@@ -11,6 +11,7 @@ class UEdGraph;
 class UEdGraphNode;
 class UEdGraphPin;
 class AActor;
+class UWorld;
 class UK2Node_Event;
 class UK2Node_CallFunction;
 class UK2Node_VariableGet;
@@ -129,6 +130,13 @@ public:
 	// =========================================================================
 	// Actor Utilities
 	// =========================================================================
+
+	/**
+	 * Find an actor of World by object name, then by editor label. In a game (PIE) world the runtime
+	 * aliases are also accepted: @player_pawn, @player_controller, @player_state, @hud, @game_mode,
+	 * @game_state and @level_script (the Level Blueprint's actor).
+	 */
+	static AActor* FindActor(UWorld* World, const FString& NameOrAlias);
 
 	/** Convert an actor to a JSON object with location/rotation/scale */
 	static TSharedPtr<FJsonObject> ActorToJsonObject(AActor* Actor);

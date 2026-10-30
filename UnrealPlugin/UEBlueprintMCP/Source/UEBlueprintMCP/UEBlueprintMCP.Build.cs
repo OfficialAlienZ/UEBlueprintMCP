@@ -68,6 +68,7 @@ public class UEBlueprintMCP : ModuleRules
 			"RenderCore",         // For material shader compilation
 			"AIModule",           // For Behavior Tree / Blackboard introspection
 			"GameplayTasks",      // Required by AIModule headers
+			"ImageWrapper",       // PNG encoding for take_screenshot
 		});
 
 		bool bEnhancedInput = ShouldUseEnhancedInput(Target);

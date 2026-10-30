@@ -161,12 +161,18 @@ namespace
 // FGetActorsInLevelAction
 // ============================================================================
 
+bool FGetActorsInLevelAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	return ValidateWorldParam(Params, OutError);
+}
+
 TSharedPtr<FJsonObject> FGetActorsInLevelAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
 {
-	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	FString WorldError;
+	UWorld* World = ResolveWorld(Params, WorldError);
 	if (!World)
 	{
-		return CreateErrorResponse(TEXT("No editor world available"), TEXT("no_world"));
+		return CreateErrorResponse(WorldError, TEXT("no_world"));
 	}
 
 	const int32 Limit = FMath::Clamp((int32)GetOptionalNumber(Params, TEXT("limit"), DefaultActorQueryLimit), 1, MaxActorQueryLimit);
@@ -191,7 +197,7 @@ TSharedPtr<FJsonObject> FGetActorsInLevelAction::ExecuteInternal(const TSharedPt
 bool FFindActorsByNameAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
 {
 	FString Pattern;
-	return GetRequiredString(Params, TEXT("pattern"), Pattern, OutError);
+	return GetRequiredString(Params, TEXT("pattern"), Pattern, OutError) && ValidateWorldParam(Params, OutError);
 }
 
 TSharedPtr<FJsonObject> FFindActorsByNameAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
@@ -199,10 +205,10 @@ TSharedPtr<FJsonObject> FFindActorsByNameAction::ExecuteInternal(const TSharedPt
 	FString Pattern, Error;
 	GetRequiredString(Params, TEXT("pattern"), Pattern, Error);
 
-	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	UWorld* World = ResolveWorld(Params, Error);
 	if (!World)
 	{
-		return CreateErrorResponse(TEXT("No editor world available"), TEXT("no_world"));
+		return CreateErrorResponse(Error, TEXT("no_world"));
 	}
 
 	const int32 Limit = FMath::Clamp((int32)GetOptionalNumber(Params, TEXT("limit"), DefaultActorQueryLimit), 1, MaxActorQueryLimit);
@@ -361,7 +367,7 @@ TSharedPtr<FJsonObject> FDeleteActorAction::ExecuteInternal(const TSharedPtr<FJs
 bool FSetActorTransformAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
 {
 	FString Name;
-	return GetRequiredString(Params, TEXT("name"), Name, OutError);
+	return GetRequiredString(Params, TEXT("name"), Name, OutError) && ValidateEditableWorldParam(Params, OutError);
 }
 
 TSharedPtr<FJsonObject> FSetActorTransformAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
@@ -369,13 +375,14 @@ TSharedPtr<FJsonObject> FSetActorTransformAction::ExecuteInternal(const TSharedP
 	FString ActorName, Error;
 	GetRequiredString(Params, TEXT("name"), ActorName, Error);
 
-	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	bool bIsPIE = false;
+	UWorld* World = ResolveWorld(Params, Error, &bIsPIE);
 	if (!World)
 	{
-		return CreateErrorResponse(TEXT("No editor world available"), TEXT("no_world"));
+		return CreateErrorResponse(Error, TEXT("no_world"));
 	}
 
-	AActor* Actor = FindActorByName(World, ActorName);
+	AActor* Actor = FMCPCommonUtils::FindActor(World, ActorName);
 	if (!Actor)
 	{
 		return CreateErrorResponse(
@@ -402,8 +409,11 @@ TSharedPtr<FJsonObject> FSetActorTransformAction::ExecuteInternal(const TSharedP
 
 	Actor->SetActorTransform(Transform);
 
-	// Mark level dirty so auto-save works
-	Context.MarkPackageDirty(World->GetOutermost());
+	// Mark level dirty so auto-save works (the PIE world is a throwaway copy)
+	if (!bIsPIE)
+	{
+		Context.MarkPackageDirty(World->GetOutermost());
+	}
 
 	UE_LOG(LogTemp, Log, TEXT("UEBlueprintMCP: Set transform on actor '%s'"), *ActorName);
 
@@ -418,7 +428,7 @@ TSharedPtr<FJsonObject> FSetActorTransformAction::ExecuteInternal(const TSharedP
 bool FGetActorPropertiesAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
 {
 	FString Name;
-	return GetRequiredString(Params, TEXT("name"), Name, OutError);
+	return GetRequiredString(Params, TEXT("name"), Name, OutError) && ValidateWorldParam(Params, OutError);
 }
 
 TSharedPtr<FJsonObject> FGetActorPropertiesAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
@@ -426,13 +436,13 @@ TSharedPtr<FJsonObject> FGetActorPropertiesAction::ExecuteInternal(const TShared
 	FString ActorName, Error;
 	GetRequiredString(Params, TEXT("name"), ActorName, Error);
 
-	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	UWorld* World = ResolveWorld(Params, Error);
 	if (!World)
 	{
-		return CreateErrorResponse(TEXT("No editor world available"), TEXT("no_world"));
+		return CreateErrorResponse(Error, TEXT("no_world"));
 	}
 
-	AActor* Actor = FindActorByName(World, ActorName);
+	AActor* Actor = FMCPCommonUtils::FindActor(World, ActorName);
 	if (!Actor)
 	{
 		return CreateErrorResponse(
@@ -486,7 +496,7 @@ bool FSetActorPropertyAction::Validate(const TSharedPtr<FJsonObject>& Params, FM
 		OutError = TEXT("Missing 'property_value' parameter");
 		return false;
 	}
-	return true;
+	return ValidateEditableWorldParam(Params, OutError);
 }
 
 TSharedPtr<FJsonObject> FSetActorPropertyAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
@@ -495,13 +505,14 @@ TSharedPtr<FJsonObject> FSetActorPropertyAction::ExecuteInternal(const TSharedPt
 	GetRequiredString(Params, TEXT("name"), ActorName, Error);
 	GetRequiredString(Params, TEXT("property_name"), PropertyName, Error);
 
-	UWorld* World = GEditor ? GEditor->GetEditorWorldContext().World() : nullptr;
+	bool bIsPIE = false;
+	UWorld* World = ResolveWorld(Params, Error, &bIsPIE);
 	if (!World)
 	{
-		return CreateErrorResponse(TEXT("No editor world available"), TEXT("no_world"));
+		return CreateErrorResponse(Error, TEXT("no_world"));
 	}
 
-	AActor* Actor = FindActorByName(World, ActorName);
+	AActor* Actor = FMCPCommonUtils::FindActor(World, ActorName);
 	if (!Actor)
 	{
 		return CreateErrorResponse(
@@ -518,8 +529,11 @@ TSharedPtr<FJsonObject> FSetActorPropertyAction::ExecuteInternal(const TSharedPt
 		return CreateErrorResponse(ErrorMessage, TEXT("property_set_failed"));
 	}
 
-	// Mark level dirty so auto-save works
-	Context.MarkPackageDirty(World->GetOutermost());
+	// Mark level dirty so auto-save works (the PIE world is a throwaway copy)
+	if (!bIsPIE)
+	{
+		Context.MarkPackageDirty(World->GetOutermost());
+	}
 
 	UE_LOG(LogTemp, Log, TEXT("UEBlueprintMCP: Set property '%s' on actor '%s'"), *PropertyName, *ActorName);
 

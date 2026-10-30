@@ -16,9 +16,13 @@
  *   - object_path: full object path, e.g. /Script/EngineSettings.Default__GameMapsSettings or
  *       /Game/Data/DA_Config (asset). The shortcut "world_settings" is the open level's World Settings
  *       (DefaultGameMode, ...).
- *   - actor_name: actor in the editor level; component_name (optional) selects one of its components
+ *   - actor_name: actor in the level (name or label); component_name (optional) selects one of its components.
+ *       With world "pie" the runtime aliases @player_pawn, @player_controller, @player_state, @hud,
+ *       @game_mode, @game_state and @level_script are also accepted
  *   - blueprint_name: Blueprint (name, path or "level:<Map>"); its class default object. component_name
  *       (optional) selects a Blueprint component template instead
+ *   - world (optional, default "editor"): "editor" | "pie" | "auto". Level of actor_name / world_settings:
+ *       "pie" reads the live values of the running game
  *   - property_names (optional): only these properties
  *   - editable_only (optional, default false): only properties exposed to the editor
  */

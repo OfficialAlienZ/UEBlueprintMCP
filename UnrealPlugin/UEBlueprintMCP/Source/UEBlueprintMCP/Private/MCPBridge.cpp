@@ -10,6 +10,9 @@
 #include "Actions/AssetInspectionActions.h"
 #include "Actions/ObjectInspectionActions.h"
 #include "Actions/PIEActions.h"
+#include "Actions/GameplayActions.h"
+#include "Actions/ObserveActions.h"
+#include "Actions/AutomationActions.h"
 #include "MCPLogCapture.h"
 #include "Actions/NodeActions.h"
 #include "Actions/ProjectActions.h"
@@ -123,6 +126,15 @@ void UMCPBridge::RegisterActions()
 	ActionHandlers.Add(TEXT("get_pie_status"), MakeShared<FGetPIEStatusAction>());
 	ActionHandlers.Add(TEXT("get_output_log"), MakeShared<FGetOutputLogAction>());
 	ActionHandlers.Add(TEXT("execute_console_command"), MakeShared<FExecuteConsoleCommandAction>());
+	ActionHandlers.Add(TEXT("call_actor_function"), MakeShared<FCallActorFunctionAction>());
+	ActionHandlers.Add(TEXT("inject_input"), MakeShared<FInjectInputAction>());
+	ActionHandlers.Add(TEXT("check_condition"), MakeShared<FCheckConditionAction>());
+	ActionHandlers.Add(TEXT("take_screenshot"), MakeShared<FTakeScreenshotAction>());
+
+	// Automation Test Framework (Functional Tests, Project.* tests)
+	ActionHandlers.Add(TEXT("list_automation_tests"), MakeShared<FListAutomationTestsAction>());
+	ActionHandlers.Add(TEXT("run_automation_tests"), MakeShared<FRunAutomationTestsAction>());
+	ActionHandlers.Add(TEXT("get_automation_results"), MakeShared<FGetAutomationResultsAction>());
 
 	// =========================================================================
 	// Node Actions - Graph Operations

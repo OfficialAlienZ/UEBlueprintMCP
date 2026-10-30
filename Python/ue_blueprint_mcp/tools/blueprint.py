@@ -175,7 +175,8 @@ def get_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "object_path": {"type": "string", "description": "Full object path, or 'world_settings'"},
-                    "actor_name": {"type": "string", "description": "Actor in the open level"},
+                    "actor_name": {"type": "string", "description": "Actor in the open level (or in the PIE world with world='pie'; also accepts @player_pawn, @player_controller, @player_state, @hud, @game_mode, @game_state, @level_script)"},
+                    "world": {"type": "string", "enum": ["editor", "pie", "auto"], "description": "Level to read actor_name / world_settings from (default editor). 'pie' reads the live values of the running game"},
                     "blueprint_name": {"type": "string", "description": "Blueprint name/path or 'level:<Map>'; exports its class defaults"},
                     "component_name": {"type": "string", "description": "Component of actor_name / blueprint_name"},
                     "property_names": {"type": "array", "items": {"type": "string"}, "description": "Only these properties (case-insensitive)"},

@@ -10,6 +10,8 @@ class AActor;
 /**
  * FGetActorsInLevelAction
  * Returns all actors in the current level.
+ *
+ * Optional "world": "editor" (default) | "pie" (the running game, including runtime-spawned actors) | "auto".
  */
 class UEBLUEPRINTMCP_API FGetActorsInLevelAction : public FEditorAction
 {
@@ -17,7 +19,7 @@ public:
 	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
 
 protected:
-	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override { return true; }
+	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
 	virtual FString GetActionName() const override { return TEXT("get_actors_in_level"); }
 	virtual bool RequiresSave() const override { return false; }
 };
@@ -75,6 +77,8 @@ protected:
 /**
  * FSetActorTransformAction
  * Sets the transform (location/rotation/scale) of an actor.
+ * Optional "world": "editor" (default) | "pie" (teleport an actor of the running game; nothing is saved).
+ * The actor "name" may be an actor name, an editor label or, in PIE, an alias such as @player_pawn.
  */
 class UEBLUEPRINTMCP_API FSetActorTransformAction : public FEditorAction
 {
@@ -84,6 +88,8 @@ public:
 protected:
 	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
 	virtual FString GetActionName() const override { return TEXT("set_actor_transform"); }
+	// Editing the editor level is blocked during PIE (checked in Validate); world "pie" is allowed.
+	virtual bool BlocksDuringPIE() const override { return false; }
 };
 
 
@@ -92,7 +98,9 @@ protected:
  * Gets an actor's level placement (components, overrides) and, on request, all its reflected properties.
  *
  * Parameters:
- *   - name: Actor name (e.g. "WorldSettings" for the level's World Settings)
+ *   - name: Actor name, label or, with world "pie", an alias (@player_pawn, @player_controller, @player_state,
+ *       @hud, @game_mode, @game_state, @level_script). "WorldSettings" = the level's World Settings
+ *   - world (optional, default "editor"): "editor" | "pie" (runtime values of the running game) | "auto"
  *   - include_properties (optional, default true): changed component/actor properties
  *   - include_all_properties (optional, default false): add "all_properties" with every UPROPERTY as Export Text
  *   - property_names (optional): only these properties in "all_properties" (implies include_all_properties)
@@ -113,6 +121,8 @@ protected:
 /**
  * FSetActorPropertyAction
  * Sets a property on an actor.
+ * Optional "world": "editor" (default) | "pie" (change a variable of the running game, e.g. to set up a
+ * test scenario; nothing is saved). The actor "name" accepts the same aliases as get_actor_properties.
  */
 class UEBLUEPRINTMCP_API FSetActorPropertyAction : public FEditorAction
 {
@@ -122,6 +132,8 @@ public:
 protected:
 	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
 	virtual FString GetActionName() const override { return TEXT("set_actor_property"); }
+	// Editing the editor level is blocked during PIE (checked in Validate); world "pie" is allowed.
+	virtual bool BlocksDuringPIE() const override { return false; }
 };
 
 

@@ -73,7 +73,8 @@ protected:
  * FGetPIEStatusAction
  *
  * Report PIE state: "stopped", "starting" or "running" (plus world name, net mode,
- * game time, paused flag and actor count while running) and the current log cursor.
+ * game time, paused flag, actor count and a "player" object with the first player's controller / pawn
+ * (name, class, location) while running) and the current log cursor.
  */
 class UEBLUEPRINTMCP_API FGetPIEStatusAction : public FEditorAction
 {

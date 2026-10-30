@@ -18,12 +18,21 @@
 #include "Materials/Material.h"
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Containers/Ticker.h"
+#include "GameFramework/PlayerController.h"
+#include "GameFramework/PlayerInput.h"
 
 #if ENGINE_MAJOR_VERSION >= 5
 #include "UObject/SavePackage.h"
 #define MCP_UE5 1
 #else
 #define MCP_UE5 0
+#endif
+
+// APlayerController::InputKey takes FInputKeyParams from UE 5.1 on (the loose-argument overloads are deprecated).
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+#define MCP_INPUT_KEY_PARAMS 1
+#else
+#define MCP_INPUT_KEY_PARAMS 0
 #endif
 
 // Defined by UEBlueprintMCP.Build.cs. 1 when the EnhancedInput module is linked.
@@ -129,6 +138,29 @@ namespace MCPCompat
 		FRequestPlaySessionParams Params;
 		Params.WorldType = bSimulate ? EPlaySessionWorldType::SimulateInEditor : EPlaySessionWorldType::PlayInEditor;
 		GEditor->RequestPlaySession(Params);
+	}
+
+	/**
+	 * Feed a key event (press/release/analog value) to a player controller as if it came from a device.
+	 * UE 5.1+ takes FInputKeyParams; UE 4.27 / 5.0 take the loose arguments.
+	 */
+	inline bool InjectKeyEvent(APlayerController* PlayerController, const FKey& Key, EInputEvent Event, float AmountDepressed, bool bGamepad)
+	{
+#if MCP_INPUT_KEY_PARAMS
+		return PlayerController->InputKey(FInputKeyParams(Key, Event, static_cast<double>(AmountDepressed), bGamepad));
+#else
+		return PlayerController->InputKey(Key, Event, AmountDepressed, bGamepad);
+#endif
+	}
+
+	/** Feed an axis delta (mouse movement, analog stick) to a player controller. */
+	inline bool InjectKeyAxis(APlayerController* PlayerController, const FKey& Key, float Delta, float DeltaTime, bool bGamepad)
+	{
+#if MCP_INPUT_KEY_PARAMS
+		return PlayerController->InputKey(FInputKeyParams(Key, static_cast<double>(Delta), DeltaTime, 1, bGamepad));
+#else
+		return PlayerController->InputAxis(Key, Delta, DeltaTime, 1, bGamepad);
+#endif
 	}
 
 	/** Add a game-thread core ticker. Delegate returns true to keep ticking, false to stop. FTSTicker (UE5) / FTicker (UE4). */

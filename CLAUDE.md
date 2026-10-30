@@ -39,6 +39,9 @@ UEBlueprintMCP/
 │       │       ├── AssetInspectionActions.h # Enum / Curve / Data Table introspection
 │       │       ├── ObjectInspectionActions.h # get_object_properties (full UPROPERTY export), get_project_config (ini)
 │       │       ├── PIEActions.h         # PIE start/stop/status, Output Log, console commands
+│       │       ├── GameplayActions.h    # Runtime gameplay driving in PIE (call_actor_function, inject_input)
+│       │       ├── ObserveActions.h     # check_condition (one-shot PIE assertions), take_screenshot
+│       │       ├── AutomationActions.h  # list/run/get results of Automation Framework tests (async runner on a core ticker)
 │       │       ├── NodeActions.h
 │       │       ├── ProjectActions.h
 │       │       ├── UMGActions.h
@@ -60,13 +63,17 @@ UEBlueprintMCP/
 │               ├── AssetInspectionActions.cpp
 │               ├── ObjectInspectionActions.cpp
 │               ├── PIEActions.cpp
+│               ├── GameplayActions.cpp
+│               ├── ObserveActions.cpp
+│               ├── AutomationActions.cpp
 │               ├── NodeActions.cpp
 │               ├── ProjectActions.cpp
 │               ├── UMGActions.cpp
 │               └── MaterialActions.cpp
 │
 └── docs/
-    └── SKILL.md                     # Claude Code skill file (reference doc)
+    ├── SKILL.md                     # Claude Code skill file (reference doc)
+    └── PLAYTEST.md                  # Skill: autonomous play-testing and bug reporting
 ```
 
 ## Architecture
@@ -308,6 +315,16 @@ UE4 differences handled:
 - Classes not exported from their modules (linker errors on `StaticClass()`): `UMaterialExpressionSceneTexture/SceneDepth/ScreenPosition/DDX/DDY`, `UK2Node_GetSubsystemFromPC`. Resolve by name with `FindObject<UClass>` and use reflection / the exported base class.
 - Enhanced Input is optional (`MCP_WITH_ENHANCED_INPUT`, set in `UEBlueprintMCP.Build.cs`). It is OFF by default on 4.27 and on only if the project's `.uproject` enables the `EnhancedInput` plugin; ON by default on UE 5.1+. Override with env var `UEBLUEPRINTMCP_ENHANCED_INPUT=0|1`. Enhanced Input commands (`create_input_action`, `create_input_mapping_context`, `add_key_mapping_to_context`, `add_enhanced_input_action_node`) are only registered when enabled; legacy input commands always work. The plugin is not declared in the `.uplugin`.
 - `.uplugin` uses no platform allow list (`WhitelistPlatforms` in 4.27 vs `PlatformAllowList` in 5.x)
+- `APlayerController::InputKey` takes `FInputKeyParams` from UE 5.1 (`MCP_INPUT_KEY_PARAMS`); use `MCPCompat::InjectKeyEvent` / `InjectKeyAxis`. The UE5 branch is not compiled on a 4.27-only machine.
+
+### PIE world targeting
+
+Actor / inspection actions take an optional `world` param (`editor` default, `pie`, `auto`), resolved by `FEditorAction::ResolveWorld()`. Actions that also work on the PIE world override `BlocksDuringPIE()` to false and call `ValidateEditableWorldParam()` so the editor level stays protected. Actor lookup goes through `FMCPCommonUtils::FindActor(World, Name)` (name, label, then `@player_pawn`-style aliases in game worlds). Runtime-only actions (`call_actor_function`, `inject_input`) require PIE and never touch assets.
+
+### Observing and automated tests
+
+- C++ actions never block the game thread. `check_condition` is one-shot; `wait_for_condition` is a Python polling loop (`tools/editor.py`) over it. `take_screenshot` writes a PNG (ImageWrapper module) and the Python tool attaches it as `ImageContent`.
+- Automation tests: `FMCPAutomationRunner` (in `AutomationActions.cpp`) drives `FAutomationTestFramework` from a core ticker, one test at a time (StartTestByName, then ExecuteLatentCommands per tick, StopTest). Results stay in memory until the next batch; `run_automation_tests` is rejected while PIE is active and functional tests manage their own PIE.
 
 ### UMG single-child containers (UE4 editor bug)
 

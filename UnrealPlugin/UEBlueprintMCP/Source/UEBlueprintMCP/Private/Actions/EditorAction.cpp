@@ -136,6 +136,60 @@ FString FEditorAction::GetOptionalString(const TSharedPtr<FJsonObject>& Params, 
 	return Default;
 }
 
+UWorld* FEditorAction::ResolveWorld(const TSharedPtr<FJsonObject>& Params, FString& OutError, bool* bOutIsPIE) const
+{
+	const FString WorldName = GetOptionalString(Params, TEXT("world"), TEXT("editor")).ToLower();
+	if (WorldName != TEXT("editor") && WorldName != TEXT("pie") && WorldName != TEXT("auto"))
+	{
+		OutError = FString::Printf(TEXT("Invalid world '%s'. Use editor, pie or auto."), *WorldName);
+		return nullptr;
+	}
+
+	const bool bPIE = WorldName == TEXT("pie") || (WorldName == TEXT("auto") && FMCPPIE::IsRunning());
+	if (bPIE && !FMCPPIE::IsRunning())
+	{
+		OutError = TEXT("world 'pie' requested but no PIE session is running. Call start_pie and wait until get_pie_status reports 'running'.");
+		return nullptr;
+	}
+
+	UWorld* World = nullptr;
+	if (GEditor)
+	{
+		World = bPIE ? GEditor->PlayWorld : GEditor->GetEditorWorldContext().World();
+	}
+	if (!World)
+	{
+		OutError = bPIE ? TEXT("The PIE world is not available.") : TEXT("No editor world available.");
+		return nullptr;
+	}
+
+	if (bOutIsPIE)
+	{
+		*bOutIsPIE = bPIE;
+	}
+	return World;
+}
+
+bool FEditorAction::ValidateWorldParam(const TSharedPtr<FJsonObject>& Params, FString& OutError) const
+{
+	return ResolveWorld(Params, OutError) != nullptr;
+}
+
+bool FEditorAction::ValidateEditableWorldParam(const TSharedPtr<FJsonObject>& Params, FString& OutError) const
+{
+	bool bIsPIE = false;
+	if (!ResolveWorld(Params, OutError, &bIsPIE))
+	{
+		return false;
+	}
+	if (!bIsPIE && FMCPPIE::IsActiveOrPending())
+	{
+		OutError = FString::Printf(TEXT("Action '%s' modifies the editor level and is blocked while Play-In-Editor is running or starting. Pass world='pie' to change the running game, or call stop_pie first."), *GetActionName());
+		return false;
+	}
+	return true;
+}
+
 const TArray<TSharedPtr<FJsonValue>>* FEditorAction::GetOptionalArray(const TSharedPtr<FJsonObject>& Params, const FString& ParamName) const
 {
 	if (Params.IsValid())
