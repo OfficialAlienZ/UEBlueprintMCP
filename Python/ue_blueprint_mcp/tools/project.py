@@ -16,7 +16,7 @@ def _send_command_sync(command_type: str, params: dict | None = None) -> list[Te
     if not conn.is_connected:
         conn.connect()
     result = conn.send_command(command_type, params)
-    return [TextContent(type="text", text=json.dumps(result.to_dict(), indent=2))]
+    return [TextContent(type="text", text=json.dumps(result.to_dict(), separators=(',', ':')))]
 
 
 async def _send_command(command_type: str, params: dict | None = None) -> list[TextContent]:

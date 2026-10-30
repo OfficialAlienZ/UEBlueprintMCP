@@ -16,7 +16,7 @@ def _send_command_sync(command_type: str, params: dict | None = None) -> list[Te
     if not conn.is_connected:
         conn.connect()
     result = conn.send_command(command_type, params)
-    return [TextContent(type="text", text=json.dumps(result.to_dict(), indent=2))]
+    return [TextContent(type="text", text=json.dumps(result.to_dict(), separators=(',', ':')))]
 
 
 async def _send_command(command_type: str, params: dict | None = None) -> list[TextContent]:
@@ -474,6 +474,54 @@ def get_tools() -> list[Tool]:
                 "required": ["blueprint_name", "node_id", "node_position"]
             }
         ),
+        Tool(
+            name="get_graph_connections",
+            description="Read a whole graph in one compact call: numbered nodes ('index title | guid'), links 'from.pin>to.pin' (output to input), unlinked input defaults 'node.pin=value', and the names of all graphs in the Blueprint. Read-only.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
+                    "graph_name": {"type": "string", "description": "Optional function graph name (defaults to event graph)"}
+                },
+                "required": ["blueprint_name"]
+            }
+        ),
+        Tool(
+            name="convert_to_validated_get",
+            description="Convert a variable Get node to a Validated Get (object/class: exec pins execute, then=Is Valid, else=Is Not Valid) or a Branch (bool: then=True, else=False), or back to a pure Get with pure=true. Links on the value pin are kept; wire the exec pins afterwards.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
+                    "node_id": {"type": "string", "description": "GUID of the variable Get node"},
+                    "pure": {"type": "boolean", "description": "true converts back to a pure Get (default false)"},
+                    "graph_name": {"type": "string", "description": "Optional function graph name (defaults to event graph)"}
+                },
+                "required": ["blueprint_name", "node_id"]
+            }
+        ),
+        Tool(
+            name="batch",
+            description="Run several commands in ONE call (any tool name of this server as 'type', e.g. add_blueprint_function_node, connect_blueprint_nodes, compile_blueprint). A string param '$N.field' is replaced by that field of command N's result (0-based), e.g. '$0.node_id'. Stops at the first failure unless stop_on_error is false.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "commands": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "type": {"type": "string", "description": "Command (tool) name"},
+                                "params": {"type": "object", "description": "That command's parameters"}
+                            },
+                            "required": ["type"]
+                        }
+                    },
+                    "stop_on_error": {"type": "boolean", "description": "Default true"}
+                },
+                "required": ["commands"]
+            }
+        ),
     ]
 
 
@@ -511,6 +559,9 @@ TOOL_HANDLERS = {
     "find_blueprint_nodes": "find_blueprint_nodes",
     "delete_blueprint_node": "delete_blueprint_node",
     "get_node_pins": "get_node_pins",
+    "get_graph_connections": "get_graph_connections",
+    "convert_to_validated_get": "convert_to_validated_get",
+    "batch": "batch",
     "set_node_position": "set_node_position",
 }
 

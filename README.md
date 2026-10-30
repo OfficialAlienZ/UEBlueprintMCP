@@ -21,6 +21,11 @@ A Model Context Protocol (MCP) server for AI-assisted Unreal Engine 4.27 / 5.x B
 | **Materials** | Create materials, add expressions, connect nodes, post-process |
 | **UMG Widgets** | Create widgets, add text/buttons, bind events |
 | **Editor** | Spawn actors, viewport control, save operations |
+| **Graph reading** | `get_graph_connections`: a whole graph in one compact call (numbered nodes, `3.then>7.execute` links, unlinked input defaults, list of graphs) |
+| **Batching** | `batch`: several commands in one call; `"$N.field"` uses a field of command N's result (e.g. `"$0.node_id"`) |
+| **Validated Get** | `convert_to_validated_get`: variable Get to Validated Get (objects) / Branch (bools), or back to pure (UE 5.x) |
+
+Several clients can be connected at the same time (e.g. the MCP server and a script); commands still run one at a time on the game thread.
 
 ## Setup
 

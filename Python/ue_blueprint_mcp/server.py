@@ -26,7 +26,7 @@ server = Server("ue-blueprint-mcp")
 def _result_to_text(result: CommandResult) -> list[TextContent]:
     """Convert CommandResult to MCP text content."""
     import json
-    return [TextContent(type="text", text=json.dumps(result.to_dict(), indent=2))]
+    return [TextContent(type="text", text=json.dumps(result.to_dict(), separators=(',', ':')))]
 
 
 def _send_command_sync(command_type: str, params: dict | None = None) -> list[TextContent]:
