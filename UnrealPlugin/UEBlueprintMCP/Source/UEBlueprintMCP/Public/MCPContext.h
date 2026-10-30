@@ -19,6 +19,9 @@ struct UEBLUEPRINTMCP_API FMCPEditorContext
 {
 public:
 	FMCPEditorContext();
+	~FMCPEditorContext();
+	FMCPEditorContext(const FMCPEditorContext&) = delete;
+	FMCPEditorContext& operator=(const FMCPEditorContext&) = delete;
 
 	// =========================================================================
 	// Current Focus
@@ -66,6 +69,15 @@ public:
 	/** Packages that have been modified and need saving */
 	TSet<UPackage*> DirtyPackages;
 
+private:
+	/** Handle of the pending deferred-save ticker (invalid when no save is pending) */
+	FDelegateHandle SaveTickerHandle;
+
+	/** FPlatformTime::Seconds() when the oldest unsaved request was made */
+	double PendingSaveSince = 0.0;
+
+public:
+
 	// =========================================================================
 	// Methods
 	// =========================================================================
@@ -85,8 +97,17 @@ public:
 	/** Mark a package as dirty (needs saving) */
 	void MarkPackageDirty(UPackage* Package);
 
-	/** Save all dirty packages */
+	/** Save all dirty packages immediately */
 	void SaveDirtyPackages();
+
+	/**
+	 * Schedule a save shortly after the last request (debounced). Rapid command bursts
+	 * collapse into one save instead of one save (and Blueprint compile) per command.
+	 */
+	void RequestSave();
+
+	/** Save now if a deferred save is pending. Call before operations that need disk state (e.g. PIE). */
+	void FlushPendingSave();
 
 	/** Clear the context (reset to defaults) */
 	void Clear();

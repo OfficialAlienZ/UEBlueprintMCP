@@ -158,6 +158,9 @@ TSharedPtr<FJsonObject> FStartPIEAction::ExecuteInternal(const TSharedPtr<FJsonO
 	// Capture the cursor first so callers can read everything logged by the session.
 	const int64 LogCursor = FMCPLogCapture::Get().GetLatestId();
 
+	// Persist any deferred auto-save now; saving is blocked once PIE is running
+	Context.FlushPendingSave();
+
 	FMCPPIE::MarkStartRequested();
 	MCPCompat::RequestPlaySession(bSimulate);
 

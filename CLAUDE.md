@@ -89,7 +89,7 @@ ALL Unreal Editor operations MUST flow through the `FEditorAction` base class ex
 
 1. **Validation** - Parameters checked before touching editor state
 2. **Error Handling** - Graceful failures with descriptive messages
-3. **Auto-Save** - Dirty packages saved after every successful action
+3. **Auto-Save** - Dirty packages saved after successful actions, debounced (`Context.RequestSave()`: ~2s after the last action, max 15s) so command bursts share one save; use `Context.SaveDirtyPackages()` / `FlushPendingSave()` when disk state is needed immediately
 4. **Crash Protection** - SEH wrappers (Windows) prevent editor crashes
 
 ```cpp

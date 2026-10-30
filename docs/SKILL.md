@@ -50,8 +50,8 @@ This skill provides specialized knowledge for working with Unreal Engine Bluepri
 - `set_physics_properties` - Configure physics simulation
 
 ### Variables
-- `add_blueprint_variable` - Add variable (Boolean, Integer, Float, Vector, String)
-- `add_blueprint_variable_get` - Create getter node for variable
+- `add_blueprint_variable` - Add variable (Boolean, Integer, Float, Vector, String). Optional `is_exposed`, `replicated`, `replication_condition` (e.g. OwnerOnly); if the variable already exists, its flags are updated instead
+- `add_blueprint_variable_get` - Create getter node for variable. Optional `owner_class` (Blueprint name/path, class path or native class) reads a variable of another object: the node gets a Target (`self`) pin to wire to the object reference (e.g. `owner_class: BP_Objective`, `variable_name: Missing Items`)
 - `add_blueprint_variable_set` - Create setter node for variable
 
 ### Event Nodes
@@ -75,7 +75,7 @@ This skill provides specialized knowledge for working with Unreal Engine Bluepri
 - All node commands support `graph_name` parameter to add nodes to function graphs instead of event graph
 
 ### Pin & Connection Management
-- `connect_blueprint_nodes` - Wire two nodes together (source_node_id, source_pin, target_node_id, target_pin); supports `graph_name`
+- `connect_blueprint_nodes` - Wire two nodes together (source_node_id, source_pin, target_node_id, target_pin); supports `graph_name`. Pass `connections` (array of those four fields) to wire many pins in ONE call: preferred over repeated calls, especially on Widget Blueprints. A partial failure reports how many were applied and which indices failed.
 - `set_node_pin_default` - Set default value; handles object pins by loading assets with StaticLoadObject
 
 ### Event Dispatchers
@@ -275,7 +275,7 @@ Validation → Execution → Post-Validation → Auto-Save
 **Key Features:**
 - **Persistent socket** - Connection stays open between commands (no reconnect overhead)
 - **Central handler** - All commands flow through `MCPBridge::ExecuteCommand()`
-- **Auto-save** - Dirty packages saved after each successful action
+- **Auto-save** - Dirty packages are saved ~2s after the last successful action (debounced, max 15s), so command bursts share one save; `save_all` and `start_pie` flush/save immediately
 - **Crash protection** - Actions validate inputs before execution
 
 ### Action Class Hierarchy

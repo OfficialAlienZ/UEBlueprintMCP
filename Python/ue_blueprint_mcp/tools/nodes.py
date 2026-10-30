@@ -202,26 +202,34 @@ def get_tools() -> list[Tool]:
         # =====================================================================
         Tool(
             name="add_blueprint_variable",
-            description="Add a variable to a Blueprint.",
+            description="Add a variable to a Blueprint. If the variable already exists, its flags (is_exposed, replicated, replication_condition) are updated instead.",
             inputSchema={
                 "type": "object",
                 "properties": {
                     "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
                     "variable_name": {"type": "string", "description": "Name of the variable"},
                     "variable_type": {"type": "string", "description": "Type (Boolean, Integer, Float, Vector, etc.)"},
-                    "is_exposed": {"type": "boolean", "description": "Expose to editor"}
+                    "is_exposed": {"type": "boolean", "description": "Expose to editor"},
+                    "replicated": {"type": "boolean", "description": "Tick the Replicated checkbox (false clears it)"},
+                    "replication_condition": {"type": "string", "description": "Replication condition, e.g. None, InitialOnly, OwnerOnly, SkipOwner, SimulatedOnly, AutonomousOnly, Custom. Implies replicated=true"}
                 },
                 "required": ["blueprint_name", "variable_name", "variable_type"]
             }
         ),
         Tool(
             name="add_blueprint_variable_get",
-            description="Add a Variable Get node to a Blueprint graph.",
+            description=(
+                "Add a Variable Get node to a Blueprint graph. By default it reads a variable of the Blueprint "
+                "being edited. With owner_class it reads a variable of ANOTHER object instead: the node gets a "
+                "Target ('self') input pin, connect it to the object reference (e.g. owner_class BP_Objective, "
+                "variable_name 'Missing Items')."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
                     "variable_name": {"type": "string", "description": "Name of the variable"},
+                    "owner_class": {"type": "string", "description": "Optional. Class that owns the variable when it belongs to another object: Blueprint name/path (BP_Objective), class path or native class name. Omit for the Blueprint's own variables."},
                     "node_position": {"type": "string", "description": "[X, Y] position"},
                     "graph_name": {"type": "string", "description": "Optional function graph name"}
                 },
@@ -369,7 +377,11 @@ def get_tools() -> list[Tool]:
         # =====================================================================
         Tool(
             name="connect_blueprint_nodes",
-            description="Connect two nodes in a Blueprint graph.",
+            description=(
+                "Connect two nodes in a Blueprint graph. To wire several pins, pass them all in one call via "
+                "'connections' (one save/compile instead of one per pin; much safer on Widget Blueprints than "
+                "many separate calls). Either give the four single-connection fields or 'connections'."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -378,9 +390,23 @@ def get_tools() -> list[Tool]:
                     "source_pin": {"type": "string", "description": "Name of the output pin"},
                     "target_node_id": {"type": "string", "description": "GUID of the target node"},
                     "target_pin": {"type": "string", "description": "Name of the input pin"},
+                    "connections": {
+                        "type": "array",
+                        "description": "Batch mode: list of connections applied in order",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "source_node_id": {"type": "string"},
+                                "source_pin": {"type": "string"},
+                                "target_node_id": {"type": "string"},
+                                "target_pin": {"type": "string"}
+                            },
+                            "required": ["source_node_id", "source_pin", "target_node_id", "target_pin"]
+                        }
+                    },
                     "graph_name": {"type": "string", "description": "Optional function graph name"}
                 },
-                "required": ["blueprint_name", "source_node_id", "source_pin", "target_node_id", "target_pin"]
+                "required": ["blueprint_name"]
             }
         ),
         Tool(

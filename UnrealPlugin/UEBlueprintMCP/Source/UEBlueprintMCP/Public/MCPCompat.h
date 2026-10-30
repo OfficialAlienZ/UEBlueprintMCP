@@ -17,6 +17,7 @@
 #include "EdGraphSchema_K2.h"
 #include "Materials/Material.h"
 #include "AssetRegistry/AssetRegistryModule.h"
+#include "Containers/Ticker.h"
 
 #if ENGINE_MAJOR_VERSION >= 5
 #include "UObject/SavePackage.h"
@@ -128,6 +129,25 @@ namespace MCPCompat
 		FRequestPlaySessionParams Params;
 		Params.WorldType = bSimulate ? EPlaySessionWorldType::SimulateInEditor : EPlaySessionWorldType::PlayInEditor;
 		GEditor->RequestPlaySession(Params);
+	}
+
+	/** Add a game-thread core ticker. Delegate returns true to keep ticking, false to stop. FTSTicker (UE5) / FTicker (UE4). */
+	inline FDelegateHandle AddCoreTicker(TFunction<bool(float)> Callback, float DelaySeconds)
+	{
+#if MCP_UE5
+		return FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(MoveTemp(Callback)), DelaySeconds);
+#else
+		return FTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(MoveTemp(Callback)), DelaySeconds);
+#endif
+	}
+
+	inline void RemoveCoreTicker(FDelegateHandle Handle)
+	{
+#if MCP_UE5
+		FTSTicker::GetCoreTicker().RemoveTicker(Handle);
+#else
+		FTicker::GetCoreTicker().RemoveTicker(Handle);
+#endif
 	}
 
 	/** Add a class to an asset registry filter. */

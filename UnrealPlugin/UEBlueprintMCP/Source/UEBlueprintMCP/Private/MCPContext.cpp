@@ -9,10 +9,29 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "UObject/SavePackage.h"
 #include "FileHelpers.h"
+#include "Actions/PIEActions.h"
+
+namespace
+{
+	/** A save is requested this long after the last command; further commands push it back. */
+	constexpr float SaveDebounceSeconds = 2.0f;
+
+	/** Upper bound for how long a continuous command burst can postpone the save. */
+	constexpr double SaveMaxDelaySeconds = 15.0;
+}
 
 FMCPEditorContext::FMCPEditorContext()
 	: CurrentGraphName(NAME_None)
 {
+}
+
+FMCPEditorContext::~FMCPEditorContext()
+{
+	if (SaveTickerHandle.IsValid())
+	{
+		MCPCompat::RemoveCoreTicker(SaveTickerHandle);
+		SaveTickerHandle.Reset();
+	}
 }
 
 void FMCPEditorContext::SetCurrentBlueprint(UBlueprint* BP)
@@ -89,6 +108,13 @@ void FMCPEditorContext::MarkPackageDirty(UPackage* Package)
 
 void FMCPEditorContext::SaveDirtyPackages()
 {
+	// Any deferred save is superseded by this one
+	if (SaveTickerHandle.IsValid())
+	{
+		MCPCompat::RemoveCoreTicker(SaveTickerHandle);
+		SaveTickerHandle.Reset();
+	}
+
 	// Save the whole project
 	bool bSaved = FEditorFileUtils::SaveDirtyPackages(false, true, true, false, false, false);
 
@@ -112,6 +138,47 @@ void FMCPEditorContext::SaveDirtyPackages()
 	}
 
 	DirtyPackages.Empty();
+}
+
+void FMCPEditorContext::RequestSave()
+{
+	const double Now = FPlatformTime::Seconds();
+
+	if (SaveTickerHandle.IsValid())
+	{
+		// Already pending: push the save back, unless it has been postponed long enough
+		if (Now - PendingSaveSince >= SaveMaxDelaySeconds)
+		{
+			return;
+		}
+		MCPCompat::RemoveCoreTicker(SaveTickerHandle);
+		SaveTickerHandle.Reset();
+	}
+	else
+	{
+		PendingSaveSince = Now;
+	}
+
+	SaveTickerHandle = MCPCompat::AddCoreTicker([this](float) -> bool
+	{
+		// Wait while GC runs or PIE is active; saving then is unsafe
+		if (IsGarbageCollecting() || FMCPPIE::IsActiveOrPending())
+		{
+			return true;
+		}
+
+		SaveTickerHandle.Reset();
+		SaveDirtyPackages();
+		return false;
+	}, SaveDebounceSeconds);
+}
+
+void FMCPEditorContext::FlushPendingSave()
+{
+	if (SaveTickerHandle.IsValid())
+	{
+		SaveDirtyPackages();
+	}
 }
 
 void FMCPEditorContext::Clear()

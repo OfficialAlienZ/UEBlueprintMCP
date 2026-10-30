@@ -60,13 +60,13 @@ TSharedPtr<FJsonObject> FEditorAction::Execute(const TSharedPtr<FJsonObject>& Pa
 		return CreateErrorResponse(Error, TEXT("post_validation_failed"));
 	}
 
-	// Step 4: Auto-save on success
+	// Step 4: Auto-save on success (debounced: bursts of commands share one save)
 	if (RequiresSave() && Result->HasField(TEXT("success")))
 	{
 		bool bSuccess = false;
 		if (Result->TryGetBoolField(TEXT("success"), bSuccess) && bSuccess)
 		{
-			Context.SaveDirtyPackages();
+			Context.RequestSave();
 		}
 	}
 

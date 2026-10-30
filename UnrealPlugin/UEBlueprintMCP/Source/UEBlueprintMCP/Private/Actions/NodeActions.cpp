@@ -31,10 +31,12 @@
 #include "K2Node_GetSubsystem.h"
 #include "K2Node_MacroInstance.h"
 #include "Kismet2/BlueprintEditorUtils.h"
+#include "UObject/CoreNetTypes.h"
 #include "Kismet2/KismetEditorUtilities.h"
 #include "Kismet/GameplayStatics.h"
 #include "Kismet/KismetMathLibrary.h"
 #include "Kismet/KismetSystemLibrary.h"
+#include "UObject/UObjectIterator.h"
 
 // ============================================================================
 // Graph Operations (connect, find, delete, inspect)
@@ -42,6 +44,34 @@
 
 bool FConnectBlueprintNodesAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
 {
+	if (const TArray<TSharedPtr<FJsonValue>>* Connections = GetOptionalArray(Params, TEXT("connections")))
+	{
+		if (Connections->Num() == 0)
+		{
+			OutError = TEXT("'connections' must contain at least one entry");
+			return false;
+		}
+		for (int32 i = 0; i < Connections->Num(); ++i)
+		{
+			const TSharedPtr<FJsonObject>* Item = nullptr;
+			FString Value;
+			if (!(*Connections)[i].IsValid() || !(*Connections)[i]->TryGetObject(Item) || !Item || !Item->IsValid())
+			{
+				OutError = FString::Printf(TEXT("connections[%d] must be an object"), i);
+				return false;
+			}
+			for (const TCHAR* Key : { TEXT("source_node_id"), TEXT("source_pin"), TEXT("target_node_id"), TEXT("target_pin") })
+			{
+				if (!(*Item)->TryGetStringField(Key, Value) || Value.IsEmpty())
+				{
+					OutError = FString::Printf(TEXT("connections[%d] is missing required field '%s'"), i, Key);
+					return false;
+				}
+			}
+		}
+		return ValidateGraph(Params, Context, OutError);
+	}
+
 	FString SourceNodeId, TargetNodeId, SourcePin, TargetPin;
 	if (!GetRequiredString(Params, TEXT("source_node_id"), SourceNodeId, OutError)) return false;
 	if (!GetRequiredString(Params, TEXT("target_node_id"), TargetNodeId, OutError)) return false;
@@ -52,24 +82,92 @@ bool FConnectBlueprintNodesAction::Validate(const TSharedPtr<FJsonObject>& Param
 
 TSharedPtr<FJsonObject> FConnectBlueprintNodesAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
 {
-	FString SourceNodeId = Params->GetStringField(TEXT("source_node_id"));
-	FString TargetNodeId = Params->GetStringField(TEXT("target_node_id"));
-	FString SourcePinName = Params->GetStringField(TEXT("source_pin"));
-	FString TargetPinName = Params->GetStringField(TEXT("target_pin"));
-
 	UBlueprint* Blueprint = GetTargetBlueprint(Params, Context);
 	UEdGraph* TargetGraph = GetTargetGraph(Params, Context);
 
+	// Single connection
+	const TArray<TSharedPtr<FJsonValue>>* Connections = GetOptionalArray(Params, TEXT("connections"));
+	if (!Connections)
+	{
+		const FString SourceNodeId = Params->GetStringField(TEXT("source_node_id"));
+		const FString TargetNodeId = Params->GetStringField(TEXT("target_node_id"));
+
+		FString Error;
+		if (!ConnectPair(TargetGraph, SourceNodeId, Params->GetStringField(TEXT("source_pin")),
+			TargetNodeId, Params->GetStringField(TEXT("target_pin")), Error))
+		{
+			return CreateErrorResponse(Error);
+		}
+
+		MarkBlueprintModified(Blueprint, Context);
+		Context.RequestSave();
+
+		TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
+		ResultData->SetStringField(TEXT("source_node_id"), SourceNodeId);
+		ResultData->SetStringField(TEXT("target_node_id"), TargetNodeId);
+		return CreateSuccessResponse(ResultData);
+	}
+
+	// Batch: apply every connection, then mark/save the Blueprint once
+	int32 Applied = 0;
+	TArray<TSharedPtr<FJsonValue>> Failures;
+	for (int32 i = 0; i < Connections->Num(); ++i)
+	{
+		const TSharedPtr<FJsonObject> Item = (*Connections)[i]->AsObject();
+		FString Error;
+		if (ConnectPair(TargetGraph,
+			Item->GetStringField(TEXT("source_node_id")), Item->GetStringField(TEXT("source_pin")),
+			Item->GetStringField(TEXT("target_node_id")), Item->GetStringField(TEXT("target_pin")), Error))
+		{
+			++Applied;
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Failure = MakeShared<FJsonObject>();
+			Failure->SetNumberField(TEXT("index"), i);
+			Failure->SetStringField(TEXT("error"), Error);
+			Failures.Add(MakeShared<FJsonValueObject>(Failure));
+		}
+	}
+
+	if (Applied > 0)
+	{
+		MarkBlueprintModified(Blueprint, Context);
+		Context.RequestSave();
+	}
+
+	if (Failures.Num() > 0)
+	{
+		TArray<FString> Messages;
+		for (const TSharedPtr<FJsonValue>& Failure : Failures)
+		{
+			const TSharedPtr<FJsonObject> Obj = Failure->AsObject();
+			Messages.Add(FString::Printf(TEXT("connections[%d]: %s"), (int32)Obj->GetNumberField(TEXT("index")), *Obj->GetStringField(TEXT("error"))));
+		}
+		return CreateErrorResponse(FString::Printf(TEXT("%d of %d connections applied; %d failed: %s"),
+			Applied, Connections->Num(), Failures.Num(), *FString::Join(Messages, TEXT(" | "))));
+	}
+
+	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
+	ResultData->SetNumberField(TEXT("connected"), Applied);
+	return CreateSuccessResponse(ResultData);
+}
+
+bool FConnectBlueprintNodesAction::ConnectPair(UEdGraph* TargetGraph, const FString& SourceNodeId, const FString& SourcePinName,
+	const FString& TargetNodeId, const FString& TargetPinName, FString& OutError) const
+{
 	// Find the nodes
 	UEdGraphNode* SourceNode = nullptr;
 	UEdGraphNode* TargetNode = nullptr;
 	for (UEdGraphNode* Node : TargetGraph->Nodes)
 	{
-		if (Node->NodeGuid.ToString() == SourceNodeId)
+		if (!Node) continue;
+		const FString Guid = Node->NodeGuid.ToString();
+		if (Guid == SourceNodeId)
 		{
 			SourceNode = Node;
 		}
-		else if (Node->NodeGuid.ToString() == TargetNodeId)
+		if (Guid == TargetNodeId)
 		{
 			TargetNode = Node;
 		}
@@ -77,7 +175,8 @@ TSharedPtr<FJsonObject> FConnectBlueprintNodesAction::ExecuteInternal(const TSha
 
 	if (!SourceNode || !TargetNode)
 	{
-		return CreateErrorResponse(TEXT("Source or target node not found"));
+		OutError = TEXT("Source or target node not found");
+		return false;
 	}
 
 	// Find pins and provide detailed error messages
@@ -102,45 +201,41 @@ TSharedPtr<FJsonObject> FConnectBlueprintNodesAction::ExecuteInternal(const TSha
 	if (!SourcePin)
 	{
 		FString AvailablePins = GetAvailablePins(SourceNode, EGPD_Output);
-		return CreateErrorResponse(FString::Printf(
+		OutError = FString::Printf(
 			TEXT("Source pin '%s' not found on node. Available OUTPUT pins: [%s]"),
-			*SourcePinName, *AvailablePins));
+			*SourcePinName, *AvailablePins);
+		return false;
 	}
 
 	if (!TargetPin)
 	{
 		FString AvailablePins = GetAvailablePins(TargetNode, EGPD_Input);
-		return CreateErrorResponse(FString::Printf(
+		OutError = FString::Printf(
 			TEXT("Target pin '%s' not found on node. Available INPUT pins: [%s]"),
-			*TargetPinName, *AvailablePins));
+			*TargetPinName, *AvailablePins);
+		return false;
 	}
 
 	// Connect using the schema
 	const UEdGraphSchema* Schema = TargetGraph->GetSchema();
-	if (Schema)
+	if (!Schema)
 	{
-		bool bResult = Schema->TryCreateConnection(SourcePin, TargetPin);
-		if (bResult)
-		{
-			SourceNode->PinConnectionListChanged(SourcePin);
-			TargetNode->PinConnectionListChanged(TargetPin);
-			MarkBlueprintModified(Blueprint, Context);
-
-			TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
-			ResultData->SetStringField(TEXT("source_node_id"), SourceNodeId);
-			ResultData->SetStringField(TEXT("target_node_id"), TargetNodeId);
-			return CreateSuccessResponse(ResultData);
-		}
-		else
-		{
-			return CreateErrorResponse(FString::Printf(
-				TEXT("Schema refused connection: '%s' (%s) -> '%s' (%s). Types may be incompatible."),
-				*SourcePin->PinName.ToString(), *SourcePin->PinType.PinCategory.ToString(),
-				*TargetPin->PinName.ToString(), *TargetPin->PinType.PinCategory.ToString()));
-		}
+		OutError = TEXT("Failed to get graph schema");
+		return false;
 	}
 
-	return CreateErrorResponse(TEXT("Failed to get graph schema"));
+	if (!Schema->TryCreateConnection(SourcePin, TargetPin))
+	{
+		OutError = FString::Printf(
+			TEXT("Schema refused connection: '%s' (%s) -> '%s' (%s). Types may be incompatible."),
+			*SourcePin->PinName.ToString(), *SourcePin->PinType.PinCategory.ToString(),
+			*TargetPin->PinName.ToString(), *TargetPin->PinType.PinCategory.ToString());
+		return false;
+	}
+
+	SourceNode->PinConnectionListChanged(SourcePin);
+	TargetNode->PinConnectionListChanged(TargetPin);
+	return true;
 }
 
 
@@ -643,26 +738,73 @@ TSharedPtr<FJsonObject> FAddBlueprintVariableAction::ExecuteInternal(const TShar
 		return CreateErrorResponse(FString::Printf(TEXT("Unsupported variable type: %s"), *VariableType));
 	}
 
-	FBlueprintEditorUtils::AddMemberVariable(Blueprint, FName(*VariableName), PinType);
+	// Resolve replication condition up front so we fail before modifying the Blueprint
+	const FString ConditionName = GetOptionalString(Params, TEXT("replication_condition"));
+	ELifetimeCondition Condition = COND_None;
+	if (!ConditionName.IsEmpty())
+	{
+		const UEnum* ConditionEnum = StaticEnum<ELifetimeCondition>();
+		int64 Value = ConditionEnum ? ConditionEnum->GetValueByNameString(ConditionName) : INDEX_NONE;
+		if (Value == INDEX_NONE && ConditionEnum)
+		{
+			Value = ConditionEnum->GetValueByNameString(FString(TEXT("COND_")) + ConditionName);
+		}
+		if (Value == INDEX_NONE)
+		{
+			return CreateErrorResponse(FString::Printf(
+				TEXT("Invalid replication_condition '%s'. Use e.g. None, InitialOnly, OwnerOnly, SkipOwner, SimulatedOnly, AutonomousOnly, SimulatedOrPhysics, InitialOrOwner, Custom, ReplayOrOwner, ReplayOnly, SimulatedOnlyNoReplay, SimulatedOrPhysicsNoReplay, SkipReplay, Never."),
+				*ConditionName));
+		}
+		Condition = (ELifetimeCondition)Value;
+	}
 
-	// Set variable properties
+	const FName VarFName(*VariableName);
+	const bool bAlreadyExists = FBlueprintEditorUtils::FindNewVariableIndex(Blueprint, VarFName) != INDEX_NONE;
+	if (!bAlreadyExists)
+	{
+		FBlueprintEditorUtils::AddMemberVariable(Blueprint, VarFName, PinType);
+	}
+
+	// Set variable properties (also applied to an existing variable so flags can be changed after creation)
+	bool bReplicated = false;
 	for (FBPVariableDescription& Variable : Blueprint->NewVariables)
 	{
-		if (Variable.VarName == FName(*VariableName))
+		if (Variable.VarName == VarFName)
 		{
 			if (IsExposed)
 			{
 				Variable.PropertyFlags |= CPF_Edit;
 			}
+			if (Params->HasField(TEXT("replicated")))
+			{
+				if (GetOptionalBool(Params, TEXT("replicated"), false))
+				{
+					Variable.PropertyFlags |= CPF_Net;
+				}
+				else
+				{
+					Variable.PropertyFlags &= ~CPF_Net;
+					Variable.ReplicationCondition = COND_None;
+				}
+			}
+			if (!ConditionName.IsEmpty())
+			{
+				Variable.PropertyFlags |= CPF_Net;
+				Variable.ReplicationCondition = Condition;
+			}
+			bReplicated = (Variable.PropertyFlags & CPF_Net) != 0;
 			break;
 		}
 	}
 
 	MarkBlueprintModified(Blueprint, Context);
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 
 	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
 	ResultData->SetStringField(TEXT("variable_name"), VariableName);
 	ResultData->SetStringField(TEXT("variable_type"), VariableType);
+	ResultData->SetBoolField(TEXT("replicated"), bReplicated);
+	ResultData->SetBoolField(TEXT("already_existed"), bAlreadyExists);
 	return CreateSuccessResponse(ResultData);
 }
 
@@ -674,17 +816,99 @@ bool FAddBlueprintVariableGetAction::Validate(const TSharedPtr<FJsonObject>& Par
 	return ValidateGraph(Params, Context, OutError);
 }
 
+namespace
+{
+	/**
+	 * Resolve a class from a Blueprint name/path (BP_Objective), a class path
+	 * (/Script/Engine.Actor, /Game/X/BP_Y.BP_Y_C) or a native class name (Actor / AActor).
+	 */
+	UClass* ResolveOwnerClass(const FString& ClassName)
+	{
+		if (UBlueprint* OwnerBP = FMCPCommonUtils::FindBlueprint(ClassName))
+		{
+			return OwnerBP->GeneratedClass ? OwnerBP->GeneratedClass.Get() : OwnerBP->SkeletonGeneratedClass.Get();
+		}
+
+		if (ClassName.Contains(TEXT("/")) || ClassName.Contains(TEXT(".")))
+		{
+			if (UClass* ByPath = LoadClass<UObject>(nullptr, *ClassName))
+			{
+				return ByPath;
+			}
+		}
+
+		if (UClass* Engine = LoadClass<UObject>(nullptr, *FString::Printf(TEXT("/Script/Engine.%s"), *ClassName)))
+		{
+			return Engine;
+		}
+
+		// Any loaded class by name, with or without the A/U prefix
+		for (TObjectIterator<UClass> It; It; ++It)
+		{
+			const FString Name = It->GetName();
+			if (Name == ClassName || (Name.Len() > 1 && Name.RightChop(1) == ClassName && (Name[0] == TEXT('A') || Name[0] == TEXT('U'))))
+			{
+				return *It;
+			}
+		}
+		return nullptr;
+	}
+}
+
 TSharedPtr<FJsonObject> FAddBlueprintVariableGetAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
 {
 	FString VariableName = Params->GetStringField(TEXT("variable_name"));
+	const FString OwnerClassName = GetOptionalString(Params, TEXT("owner_class"));
 	FVector2D Position = GetNodePosition(Params);
 
 	UBlueprint* Blueprint = GetTargetBlueprint(Params, Context);
 	UEdGraph* TargetGraph = GetTargetGraph(Params, Context);
 
+	// Optional: read a variable that lives on another object (node gets a Target pin)
+	UClass* OwnerClass = nullptr;
+	if (!OwnerClassName.IsEmpty())
+	{
+		OwnerClass = ResolveOwnerClass(OwnerClassName);
+		if (!OwnerClass)
+		{
+			return CreateErrorResponse(FString::Printf(
+				TEXT("owner_class '%s' not found. Use a Blueprint name (BP_Objective), a class path or a native class name."), *OwnerClassName),
+				TEXT("not_found"));
+		}
+
+		FProperty* Property = OwnerClass->FindPropertyByName(FName(*VariableName));
+		if (!Property)
+		{
+			// Variables added to a Blueprint but not yet compiled only exist on the skeleton class
+			if (UBlueprint* OwnerBP = Cast<UBlueprint>(OwnerClass->ClassGeneratedBy))
+			{
+				if (OwnerBP->SkeletonGeneratedClass)
+				{
+					Property = OwnerBP->SkeletonGeneratedClass->FindPropertyByName(FName(*VariableName));
+				}
+			}
+		}
+		if (!Property)
+		{
+			return CreateErrorResponse(FString::Printf(
+				TEXT("Variable '%s' not found on class '%s'. Compile the owner Blueprint if the variable was just added."),
+				*VariableName, *OwnerClass->GetName()), TEXT("not_found"));
+		}
+	}
+
 	UK2Node_VariableGet* VarGetNode = FEdGraphSchemaAction_K2NewNode::SpawnNode<UK2Node_VariableGet>(
 		TargetGraph, Position, EK2NewNodeFlags::None,
-		[&VariableName](UK2Node_VariableGet* Node) { Node->VariableReference.SetSelfMember(FName(*VariableName)); }
+		[&VariableName, OwnerClass](UK2Node_VariableGet* Node)
+		{
+			if (OwnerClass)
+			{
+				Node->VariableReference.SetExternalMember(FName(*VariableName), OwnerClass);
+			}
+			else
+			{
+				Node->VariableReference.SetSelfMember(FName(*VariableName));
+			}
+		}
 	);
 	VarGetNode->ReconstructNode();
 
@@ -693,6 +917,11 @@ TSharedPtr<FJsonObject> FAddBlueprintVariableGetAction::ExecuteInternal(const TS
 
 	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
 	ResultData->SetStringField(TEXT("node_id"), VarGetNode->NodeGuid.ToString());
+	if (OwnerClass)
+	{
+		ResultData->SetStringField(TEXT("owner_class"), OwnerClass->GetName());
+		ResultData->SetStringField(TEXT("target_pin"), UEdGraphSchema_K2::PN_Self.ToString());
+	}
 	return CreateSuccessResponse(ResultData);
 }
 

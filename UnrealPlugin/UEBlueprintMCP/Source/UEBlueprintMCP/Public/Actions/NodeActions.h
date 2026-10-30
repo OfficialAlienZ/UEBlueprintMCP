@@ -21,6 +21,15 @@ public:
 protected:
 	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
 	virtual FString GetActionName() const override { return TEXT("connect_blueprint_nodes"); }
+
+	// Auto-save is requested by hand so a partially applied batch is still saved.
+	virtual bool RequiresSave() const override { return false; }
+	virtual bool BlocksDuringPIE() const override { return true; }
+
+private:
+	/** Connect one pin pair. Returns false and fills OutError on failure. */
+	bool ConnectPair(UEdGraph* Graph, const FString& SourceNodeId, const FString& SourcePinName,
+		const FString& TargetNodeId, const FString& TargetPinName, FString& OutError) const;
 };
 
 
