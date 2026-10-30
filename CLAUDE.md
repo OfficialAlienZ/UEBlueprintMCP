@@ -29,6 +29,7 @@ UEBlueprintMCP/
 │       │   ├── MCPCommonUtils.h     # Shared utilities
 │       │   ├── MCPInspectionUtils.h # Shared read-only introspection helpers (curves, properties, actors, widgets)
 │       │   ├── MCPLogCapture.h      # Output Log ring buffer (FOutputDevice) for get_output_log
+│       │   ├── MCPNodeLayout.h      # Auto-placement of newly added graph nodes (overlap avoidance, wire flow)
 │       │   └── Actions/             # Action class headers
 │       │       ├── EditorAction.h   # Base classes (FEditorAction hierarchy)
 │       │       ├── BlueprintActions.h
@@ -49,6 +50,7 @@ UEBlueprintMCP/
 │           ├── MCPCommonUtils.cpp   # Blueprint/asset resolution
 │           ├── MCPInspectionUtils.cpp
 │           ├── MCPLogCapture.cpp
+│           ├── MCPNodeLayout.cpp
 │           └── Actions/             # Action implementations
 │               ├── EditorAction.cpp # Base class + execution pipeline
 │               ├── BlueprintActions.cpp

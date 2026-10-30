@@ -187,6 +187,8 @@ void FMCPEditorContext::Clear()
 	CurrentGraphName = NAME_None;
 	CurrentWorld = nullptr;
 	LastCreatedNodeId.Invalidate();
+	AutoPlacedNodes.Empty();
+	LastLayoutAnchorId.Invalidate();
 	LastCreatedActorName.Empty();
 	LastCreatedWidgetName.Empty();
 	DirtyPackages.Empty();

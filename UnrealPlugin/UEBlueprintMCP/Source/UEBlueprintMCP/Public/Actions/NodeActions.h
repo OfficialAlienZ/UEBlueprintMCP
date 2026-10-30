@@ -29,7 +29,7 @@ protected:
 private:
 	/** Connect one pin pair. Returns false and fills OutError on failure. */
 	bool ConnectPair(UEdGraph* Graph, const FString& SourceNodeId, const FString& SourcePinName,
-		const FString& TargetNodeId, const FString& TargetPinName, FString& OutError) const;
+		const FString& TargetNodeId, const FString& TargetPinName, FMCPEditorContext& Context, FString& OutError) const;
 };
 
 

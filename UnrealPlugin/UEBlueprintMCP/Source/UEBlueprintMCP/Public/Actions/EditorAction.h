@@ -170,9 +170,15 @@ protected:
 	/** Get the target graph for this action */
 	UEdGraph* GetTargetGraph(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) const;
 
-	/** Add node to graph and update context */
+	/**
+	 * Place the freshly added node (see FMCPNodeLayout) and update context. Call after the node is fully built.
+	 * The node is auto-placed unless the last GetNodePosition() call found an explicit node_position.
+	 */
 	void RegisterCreatedNode(UEdGraphNode* Node, FMCPEditorContext& Context) const;
 
-	/** Parse node position from params */
+	/** Parse node position from params (also records whether node_position was given, for RegisterCreatedNode) */
 	FVector2D GetNodePosition(const TSharedPtr<FJsonObject>& Params) const;
+
+	/** Whether the last GetNodePosition() call found an explicit node_position. Reset by RegisterCreatedNode. */
+	mutable bool bNodePositionExplicit = true;
 };

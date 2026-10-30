@@ -2,6 +2,7 @@
 
 #include "Actions/NodeActions.h"
 #include "MCPCommonUtils.h"
+#include "MCPNodeLayout.h"
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
 #include "EdGraph/EdGraph.h"
@@ -94,7 +95,7 @@ TSharedPtr<FJsonObject> FConnectBlueprintNodesAction::ExecuteInternal(const TSha
 
 		FString Error;
 		if (!ConnectPair(TargetGraph, SourceNodeId, Params->GetStringField(TEXT("source_pin")),
-			TargetNodeId, Params->GetStringField(TEXT("target_pin")), Error))
+			TargetNodeId, Params->GetStringField(TEXT("target_pin")), Context, Error))
 		{
 			return CreateErrorResponse(Error);
 		}
@@ -117,7 +118,7 @@ TSharedPtr<FJsonObject> FConnectBlueprintNodesAction::ExecuteInternal(const TSha
 		FString Error;
 		if (ConnectPair(TargetGraph,
 			Item->GetStringField(TEXT("source_node_id")), Item->GetStringField(TEXT("source_pin")),
-			Item->GetStringField(TEXT("target_node_id")), Item->GetStringField(TEXT("target_pin")), Error))
+			Item->GetStringField(TEXT("target_node_id")), Item->GetStringField(TEXT("target_pin")), Context, Error))
 		{
 			++Applied;
 		}
@@ -154,7 +155,7 @@ TSharedPtr<FJsonObject> FConnectBlueprintNodesAction::ExecuteInternal(const TSha
 }
 
 bool FConnectBlueprintNodesAction::ConnectPair(UEdGraph* TargetGraph, const FString& SourceNodeId, const FString& SourcePinName,
-	const FString& TargetNodeId, const FString& TargetPinName, FString& OutError) const
+	const FString& TargetNodeId, const FString& TargetPinName, FMCPEditorContext& Context, FString& OutError) const
 {
 	// Find the nodes
 	UEdGraphNode* SourceNode = nullptr;
@@ -235,6 +236,7 @@ bool FConnectBlueprintNodesAction::ConnectPair(UEdGraph* TargetGraph, const FStr
 
 	SourceNode->PinConnectionListChanged(SourcePin);
 	TargetNode->PinConnectionListChanged(TargetPin);
+	FMCPNodeLayout::OnPinsConnected(SourcePin, TargetPin, Context);
 	return true;
 }
 
@@ -479,9 +481,10 @@ TSharedPtr<FJsonObject> FSetNodePositionAction::ExecuteInternal(const TSharedPtr
 		return CreateErrorResponse(FString::Printf(TEXT("Node not found with ID: %s"), *NodeId));
 	}
 
-	// Set position
+	// Set position (a hand-placed node is no longer moved by the automatic layout)
 	TargetNode->NodePosX = (int32)Position.X;
 	TargetNode->NodePosY = (int32)Position.Y;
+	FMCPNodeLayout::ForgetNode(TargetNode, Context);
 
 	MarkBlueprintModified(Blueprint, Context);
 
@@ -1818,6 +1821,13 @@ TSharedPtr<FJsonObject> FBindEventDispatcherAction::ExecuteInternal(const TShare
 	{
 		EventDelegatePin->MakeLinkTo(BindDelegatePin);
 	}
+
+	// Layout: the bind node first, its matching event to the right of it
+	FMCPNodeLayout::PlaceNewNode(BindNode, Context, bNodePositionExplicit);
+	CustomEventNode->NodePosX = BindNode->NodePosX + (int32)FMCPNodeLayout::EstimateNodeSize(BindNode).X + 48;
+	CustomEventNode->NodePosY = BindNode->NodePosY;
+	FMCPNodeLayout::PlaceNewNode(CustomEventNode, Context, true);
+	bNodePositionExplicit = true;
 
 	MarkBlueprintModified(Blueprint, Context);
 

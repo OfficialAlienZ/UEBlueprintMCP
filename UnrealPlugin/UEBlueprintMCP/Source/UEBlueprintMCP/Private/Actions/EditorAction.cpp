@@ -3,6 +3,7 @@
 #include "Actions/EditorAction.h"
 #include "Actions/PIEActions.h"
 #include "MCPCommonUtils.h"
+#include "MCPNodeLayout.h"
 #include "Engine/Blueprint.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
@@ -366,6 +367,8 @@ void FBlueprintNodeAction::RegisterCreatedNode(UEdGraphNode* Node, FMCPEditorCon
 {
 	if (Node)
 	{
+		FMCPNodeLayout::PlaceNewNode(Node, Context, bNodePositionExplicit);
+		bNodePositionExplicit = true;
 		Context.LastCreatedNodeId = Node->NodeGuid;
 	}
 }
@@ -373,6 +376,7 @@ void FBlueprintNodeAction::RegisterCreatedNode(UEdGraphNode* Node, FMCPEditorCon
 FVector2D FBlueprintNodeAction::GetNodePosition(const TSharedPtr<FJsonObject>& Params) const
 {
 	FVector2D Position(0, 0);
+	bNodePositionExplicit = false;
 
 	// Try string format "[X, Y]"
 	FString PosStr = GetOptionalString(Params, TEXT("node_position"));
@@ -384,6 +388,7 @@ FVector2D FBlueprintNodeAction::GetNodePosition(const TSharedPtr<FJsonObject>& P
 		{
 			Position.X = FCString::Atof(*Parts[0].TrimStartAndEnd());
 			Position.Y = FCString::Atof(*Parts[1].TrimStartAndEnd());
+			bNodePositionExplicit = true;
 		}
 	}
 
@@ -393,6 +398,7 @@ FVector2D FBlueprintNodeAction::GetNodePosition(const TSharedPtr<FJsonObject>& P
 	{
 		Position.X = (*PosArray)[0]->AsNumber();
 		Position.Y = (*PosArray)[1]->AsNumber();
+		bNodePositionExplicit = true;
 	}
 
 	return Position;

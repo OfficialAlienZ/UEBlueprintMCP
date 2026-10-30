@@ -56,6 +56,15 @@ public:
 	/** GUID of the last created node */
 	FGuid LastCreatedNodeId;
 
+	/**
+	 * Graph nodes placed by the automatic layout (created without node_position); only these may be moved
+	 * when wired. Value is true once a wire has positioned the node. See FMCPNodeLayout.
+	 */
+	TMap<FGuid, bool> AutoPlacedNodes;
+
+	/** GUID of the last flow (non-pure) node placed by the automatic layout; next node continues to its right */
+	FGuid LastLayoutAnchorId;
+
 	/** Name of the last created actor */
 	FString LastCreatedActorName;
 

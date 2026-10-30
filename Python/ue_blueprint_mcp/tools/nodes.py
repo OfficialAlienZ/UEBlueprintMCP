@@ -38,7 +38,7 @@ def get_tools() -> list[Tool]:
                 "properties": {
                     "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
                     "event_name": {"type": "string", "description": "Event name (ReceiveBeginPlay, ReceiveTick, etc.)"},
-                    "node_position": {"type": "string", "description": "[X, Y] position in graph (as JSON string)"}
+                    "node_position": {"type": "string", "description": "[X, Y] position (as JSON string). Omit to auto-place (nodes added without it are laid out left to right and re-flowed when wired)"}
                 },
                 "required": ["blueprint_name", "event_name"]
             }
@@ -51,7 +51,7 @@ def get_tools() -> list[Tool]:
                 "properties": {
                     "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
                     "event_name": {"type": "string", "description": "Name for the custom event"},
-                    "node_position": {"type": "string", "description": "[X, Y] position"},
+                    "node_position": {"type": "string", "description": "[X, Y] position. Omit to auto-place (nodes added without it are laid out left to right and re-flowed when wired)"},
                     "parameters": {
                         "type": "array",
                         "items": {"type": "object"},
@@ -69,7 +69,7 @@ def get_tools() -> list[Tool]:
                 "properties": {
                     "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
                     "action_name": {"type": "string", "description": "Name of the input action"},
-                    "node_position": {"type": "string", "description": "[X, Y] position"}
+                    "node_position": {"type": "string", "description": "[X, Y] position. Omit to auto-place (nodes added without it are laid out left to right and re-flowed when wired)"}
                 },
                 "required": ["blueprint_name", "action_name"]
             }
@@ -83,7 +83,7 @@ def get_tools() -> list[Tool]:
                     "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
                     "action_name": {"type": "string", "description": "Name of the Input Action asset (e.g., IA_Move)"},
                     "action_path": {"type": "string", "description": "Content path to the asset (default: /Game/Input)"},
-                    "node_position": {"type": "string", "description": "[X, Y] position"}
+                    "node_position": {"type": "string", "description": "[X, Y] position. Omit to auto-place (nodes added without it are laid out left to right and re-flowed when wired)"}
                 },
                 "required": ["blueprint_name", "action_name"]
             }
@@ -117,7 +117,7 @@ def get_tools() -> list[Tool]:
                 "properties": {
                     "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
                     "dispatcher_name": {"type": "string", "description": "Name of the dispatcher to call"},
-                    "node_position": {"type": "array", "items": {"type": "number"}, "description": "[X, Y] position"},
+                    "node_position": {"type": "array", "items": {"type": "number"}, "description": "[X, Y] position. Omit to auto-place (nodes added without it are laid out left to right and re-flowed when wired)"},
                     "graph_name": {"type": "string", "description": "Optional function graph name (defaults to event graph)"}
                 },
                 "required": ["blueprint_name", "dispatcher_name"]
@@ -132,7 +132,7 @@ def get_tools() -> list[Tool]:
                     "blueprint_name": {"type": "string", "description": "Blueprint where to add the bind node"},
                     "dispatcher_name": {"type": "string", "description": "Name of the dispatcher to bind to"},
                     "target_blueprint": {"type": "string", "description": "Blueprint that owns the dispatcher"},
-                    "node_position": {"type": "array", "items": {"type": "number"}, "description": "[X, Y] position"},
+                    "node_position": {"type": "array", "items": {"type": "number"}, "description": "[X, Y] position. Omit to auto-place (nodes added without it are laid out left to right and re-flowed when wired)"},
                     "graph_name": {"type": "string", "description": "Optional function graph name (defaults to event graph)"}
                 },
                 "required": ["blueprint_name", "dispatcher_name"]
@@ -152,7 +152,7 @@ def get_tools() -> list[Tool]:
                     "target": {"type": "string", "description": "Target object (component name or self)"},
                     "function_name": {"type": "string", "description": "Name of the function to call"},
                     "params": {"type": "string", "description": "Parameters as JSON string"},
-                    "node_position": {"type": "string", "description": "[X, Y] position"},
+                    "node_position": {"type": "string", "description": "[X, Y] position. Omit to auto-place (nodes added without it are laid out left to right and re-flowed when wired)"},
                     "graph_name": {"type": "string", "description": "Optional function graph name (defaults to event graph)"}
                 },
                 "required": ["blueprint_name", "target", "function_name"]
@@ -190,7 +190,7 @@ def get_tools() -> list[Tool]:
                     "blueprint_name": {"type": "string", "description": "Blueprint where to add the node"},
                     "target_blueprint": {"type": "string", "description": "Blueprint containing the function"},
                     "function_name": {"type": "string", "description": "Name of the function to call"},
-                    "node_position": {"type": "array", "items": {"type": "number"}, "description": "[X, Y] position"},
+                    "node_position": {"type": "array", "items": {"type": "number"}, "description": "[X, Y] position. Omit to auto-place (nodes added without it are laid out left to right and re-flowed when wired)"},
                     "graph_name": {"type": "string", "description": "Optional function graph name"}
                 },
                 "required": ["blueprint_name", "target_blueprint", "function_name"]
@@ -230,7 +230,7 @@ def get_tools() -> list[Tool]:
                     "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
                     "variable_name": {"type": "string", "description": "Name of the variable"},
                     "owner_class": {"type": "string", "description": "Optional. Class that owns the variable when it belongs to another object: Blueprint name/path (BP_Objective), class path or native class name. Omit for the Blueprint's own variables."},
-                    "node_position": {"type": "string", "description": "[X, Y] position"},
+                    "node_position": {"type": "string", "description": "[X, Y] position. Omit to auto-place (nodes added without it are laid out left to right and re-flowed when wired)"},
                     "graph_name": {"type": "string", "description": "Optional function graph name"}
                 },
                 "required": ["blueprint_name", "variable_name"]
@@ -244,7 +244,7 @@ def get_tools() -> list[Tool]:
                 "properties": {
                     "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
                     "variable_name": {"type": "string", "description": "Name of the variable"},
-                    "node_position": {"type": "string", "description": "[X, Y] position"},
+                    "node_position": {"type": "string", "description": "[X, Y] position. Omit to auto-place (nodes added without it are laid out left to right and re-flowed when wired)"},
                     "graph_name": {"type": "string", "description": "Optional function graph name"}
                 },
                 "required": ["blueprint_name", "variable_name"]
@@ -274,7 +274,7 @@ def get_tools() -> list[Tool]:
                     "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
                     "owner_class": {"type": "string", "description": "Class that owns the property (e.g., PlayerController)"},
                     "property_name": {"type": "string", "description": "Property to set (e.g., bShowMouseCursor)"},
-                    "node_position": {"type": "array", "items": {"type": "number"}, "description": "[X, Y] position"},
+                    "node_position": {"type": "array", "items": {"type": "number"}, "description": "[X, Y] position. Omit to auto-place (nodes added without it are laid out left to right and re-flowed when wired)"},
                     "graph_name": {"type": "string", "description": "Optional function graph name"}
                 },
                 "required": ["blueprint_name", "owner_class", "property_name"]
@@ -292,7 +292,7 @@ def get_tools() -> list[Tool]:
                 "properties": {
                     "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
                     "component_name": {"type": "string", "description": "Name of the component"},
-                    "node_position": {"type": "string", "description": "[X, Y] position"}
+                    "node_position": {"type": "string", "description": "[X, Y] position. Omit to auto-place (nodes added without it are laid out left to right and re-flowed when wired)"}
                 },
                 "required": ["blueprint_name", "component_name"]
             }
@@ -304,7 +304,7 @@ def get_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
-                    "node_position": {"type": "string", "description": "[X, Y] position"}
+                    "node_position": {"type": "string", "description": "[X, Y] position. Omit to auto-place (nodes added without it are laid out left to right and re-flowed when wired)"}
                 },
                 "required": ["blueprint_name"]
             }
@@ -318,7 +318,7 @@ def get_tools() -> list[Tool]:
                     "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
                     "target_class": {"type": "string", "description": "Class to cast to"},
                     "pure_cast": {"type": "boolean", "description": "Create as pure cast (no exec pins)"},
-                    "node_position": {"type": "array", "items": {"type": "number"}, "description": "[X, Y] position"}
+                    "node_position": {"type": "array", "items": {"type": "number"}, "description": "[X, Y] position. Omit to auto-place (nodes added without it are laid out left to right and re-flowed when wired)"}
                 },
                 "required": ["blueprint_name", "target_class"]
             }
@@ -334,7 +334,7 @@ def get_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
-                    "node_position": {"type": "string", "description": "[X, Y] position"}
+                    "node_position": {"type": "string", "description": "[X, Y] position. Omit to auto-place (nodes added without it are laid out left to right and re-flowed when wired)"}
                 },
                 "required": ["blueprint_name"]
             }
@@ -348,7 +348,7 @@ def get_tools() -> list[Tool]:
                     "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
                     "macro_name": {"type": "string", "description": "Name of the macro (ForEachLoop, ForLoop, WhileLoop, DoOnce, Gate, etc.)"},
                     "graph_name": {"type": "string", "description": "Optional function graph name (defaults to event graph)"},
-                    "node_position": {"type": "array", "items": {"type": "number"}, "description": "[X, Y] position in graph"}
+                    "node_position": {"type": "array", "items": {"type": "number"}, "description": "[X, Y] position. Omit to auto-place (nodes added without it are laid out left to right and re-flowed when wired)"}
                 },
                 "required": ["blueprint_name", "macro_name"]
             }
@@ -365,7 +365,7 @@ def get_tools() -> list[Tool]:
                 "properties": {
                     "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
                     "class_to_spawn": {"type": "string", "description": "Class to spawn (e.g., BP_Enemy)"},
-                    "node_position": {"type": "array", "items": {"type": "number"}, "description": "[X, Y] position"},
+                    "node_position": {"type": "array", "items": {"type": "number"}, "description": "[X, Y] position. Omit to auto-place (nodes added without it are laid out left to right and re-flowed when wired)"},
                     "graph_name": {"type": "string", "description": "Optional function graph name"}
                 },
                 "required": ["blueprint_name", "class_to_spawn"]
@@ -468,7 +468,7 @@ def get_tools() -> list[Tool]:
                 "properties": {
                     "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
                     "node_id": {"type": "string", "description": "GUID of the node"},
-                    "node_position": {"type": "array", "items": {"type": "number"}, "description": "[X, Y] position in graph"},
+                    "node_position": {"type": "array", "items": {"type": "number"}, "description": "[X, Y] position. Setting it by hand excludes the node from automatic layout"},
                     "graph_name": {"type": "string", "description": "Optional function graph name (defaults to event graph)"}
                 },
                 "required": ["blueprint_name", "node_id", "node_position"]
