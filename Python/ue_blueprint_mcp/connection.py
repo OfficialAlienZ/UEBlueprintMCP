@@ -52,6 +52,7 @@ class CommandResult:
     data: dict = field(default_factory=dict)
     error: Optional[str] = None
     recoverable: bool = True
+    details: Optional[dict] = None  # "result" of a failed response (e.g. per-command batch results)
 
     def to_dict(self) -> dict:
         result = {"success": self.success}
@@ -59,7 +60,10 @@ class CommandResult:
             result.update(self.data)
         else:
             result["error"] = self.error
-            result["recoverable"] = self.recoverable
+            if not self.recoverable:  # only when it matters, to keep responses short
+                result["recoverable"] = False
+            if self.details:
+                result["details"] = self.details
         return result
 
 
@@ -238,14 +242,14 @@ class PersistentUnrealConnection:
                     else:
                         error_msg = response.get("error", "Unknown error (no error message in response)")
                         error_type = response.get("error_type", "unknown")
-                        # Include raw response in error for debugging
-                        raw_preview = json.dumps(response)[:200]
-                        full_error = f"[{error_type}] {error_msg} | RAW: {raw_preview}"
-                        logger.error(f"Command '{command_type}' failed: {full_error}")
+                        # Raw response goes to the log only (not repeated in the error the AI reads)
+                        full_error = f"[{error_type}] {error_msg}"
+                        logger.error(f"Command '{command_type}' failed: {full_error} | RAW: {json.dumps(response)[:200]}")
                         return CommandResult(
                             success=False,
                             error=full_error,
-                            recoverable=response.get("recoverable", True)
+                            recoverable=response.get("recoverable", True),
+                            details=response.get("result") if isinstance(response.get("result"), dict) else None
                         )
 
                 # Check Format 2 (legacy status field - only if no success field)
@@ -258,13 +262,13 @@ class PersistentUnrealConnection:
                     else:
                         error_msg = response.get("error", "Unknown error (no error message in response)")
                         error_type = response.get("error_type", "unknown")
-                        raw_preview = json.dumps(response)[:200]
-                        full_error = f"[{error_type}] {error_msg} | RAW: {raw_preview}"
-                        logger.error(f"Command '{command_type}' failed: {full_error}")
+                        full_error = f"[{error_type}] {error_msg}"
+                        logger.error(f"Command '{command_type}' failed: {full_error} | RAW: {json.dumps(response)[:200]}")
                         return CommandResult(
                             success=False,
                             error=full_error,
-                            recoverable=response.get("recoverable", True)
+                            recoverable=response.get("recoverable", True),
+                            details=response.get("result") if isinstance(response.get("result"), dict) else None
                         )
 
                 # Unknown response format - log the raw response for debugging

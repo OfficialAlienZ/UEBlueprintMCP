@@ -427,7 +427,7 @@ def get_tools() -> list[Tool]:
                     "graph_name": {"type": "string", "description": "Graph name (defaults to event graph). See get_blueprint_info 'graphs'."},
                     "node_type": {"type": "string", "description": "Filter: Event, Function, Variable, Macro, Cast, Comment, All (default All)"},
                     "event_name": {"type": "string", "description": "With node_type=Event: specific event (ReceiveBeginPlay, custom event name, ...)"},
-                    "detail": {"type": "string", "enum": ["basic", "full"], "description": "'full' adds pins with defaults and connections (default basic)"},
+                    "detail": {"type": "string", "enum": ["compact", "basic", "full"], "description": "'compact' = one 'guid title' string per node; 'full' adds pins with defaults and connections (default basic)"},
                     "limit": {"type": "integer", "description": "Max nodes to return (0 = no limit)"},
                     "offset": {"type": "integer", "description": "Skip this many matching nodes (for paging)"}
                 },

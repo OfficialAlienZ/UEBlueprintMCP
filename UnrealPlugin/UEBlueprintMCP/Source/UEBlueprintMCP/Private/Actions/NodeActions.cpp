@@ -250,7 +250,10 @@ TSharedPtr<FJsonObject> FFindBlueprintNodesAction::ExecuteInternal(const TShared
 {
 	FString NodeType = GetOptionalString(Params, TEXT("node_type"));
 	FString EventName = GetOptionalString(Params, TEXT("event_name"));
-	const bool bFullDetail = GetOptionalString(Params, TEXT("detail"), TEXT("basic")).Equals(TEXT("full"), ESearchCase::IgnoreCase);
+	const FString Detail = GetOptionalString(Params, TEXT("detail"), TEXT("basic"));
+	const bool bFullDetail = Detail.Equals(TEXT("full"), ESearchCase::IgnoreCase);
+	// compact: one "guid title" string per node (fewest tokens)
+	const bool bCompact = Detail.Equals(TEXT("compact"), ESearchCase::IgnoreCase);
 	const int32 Offset = FMath::Max(0, (int32)GetOptionalNumber(Params, TEXT("offset"), 0));
 	const int32 Limit = FMath::Max(0, (int32)GetOptionalNumber(Params, TEXT("limit"), 0));
 
@@ -330,7 +333,14 @@ TSharedPtr<FJsonObject> FFindBlueprintNodesAction::ExecuteInternal(const TShared
 			{
 				continue;
 			}
-			NodesArray.Add(MakeShared<FJsonValueObject>(FMCPCommonUtils::NodeToJson(Node, bFullDetail)));
+			if (bCompact)
+			{
+				NodesArray.Add(MakeShared<FJsonValueString>(Node->NodeGuid.ToString() + TEXT(" ") + Node->GetNodeTitle(ENodeTitleType::ListView).ToString()));
+			}
+			else
+			{
+				NodesArray.Add(MakeShared<FJsonValueObject>(FMCPCommonUtils::NodeToJson(Node, bFullDetail)));
+			}
 		}
 	}
 
