@@ -155,7 +155,7 @@ UWorld* FEditorAction::ResolveWorld(const TSharedPtr<FJsonObject>& Params, FStri
 	UWorld* World = nullptr;
 	if (GEditor)
 	{
-		World = bPIE ? GEditor->PlayWorld : GEditor->GetEditorWorldContext().World();
+		World = bPIE ? static_cast<UWorld*>(GEditor->PlayWorld) : GEditor->GetEditorWorldContext().World();
 	}
 	if (!World)
 	{
