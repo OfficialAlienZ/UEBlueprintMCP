@@ -18,7 +18,7 @@ def _send_command_sync(command_type: str, params: dict | None = None) -> list[Te
     if not conn.is_connected:
         conn.connect()
     result = conn.send_command(command_type, params)
-    return [TextContent(type="text", text=json.dumps(result.to_dict(), indent=2))]
+    return [TextContent(type="text", text=json.dumps(result.to_dict(), separators=(',', ':')))]
 
 
 async def _send_command(command_type: str, params: dict | None = None) -> list[TextContent]:
@@ -245,6 +245,19 @@ def get_tools() -> list[Tool]:
         ),
 
         # Play-In-Editor and runtime feedback
+        Tool(
+            name="set_asset_property",
+            description="Set a property on an asset by path (e.g. a Static Mesh, a Geometry Collection, a Material Instance), like editing it in its asset editor: the asset is notified (a Static Mesh rebuilds) and saved. Structs take Unreal text with only the fields to change, e.g. property_name 'NaniteSettings', value '(bEnabled=True)'.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "object_path": {"type": "string", "description": "Full object path, e.g. /Game/Meshes/SM_Chair.SM_Chair"},
+                    "property_name": {"type": "string", "description": "Top-level property name"},
+                    "property_value": {"description": "Value: bool/number/string, or Unreal text for structs, arrays and references"}
+                },
+                "required": ["object_path", "property_name", "property_value"]
+            }
+        ),
         Tool(
             name="start_pie",
             description=(
@@ -481,6 +494,7 @@ TOOL_HANDLERS = {
     "get_viewport_transform": "get_viewport_transform",
     "set_viewport_transform": "set_viewport_transform",
     "save_all": "save_all",
+    "set_asset_property": "set_asset_property",
     "start_pie": "start_pie",
     "stop_pie": "stop_pie",
     "get_pie_status": "get_pie_status",

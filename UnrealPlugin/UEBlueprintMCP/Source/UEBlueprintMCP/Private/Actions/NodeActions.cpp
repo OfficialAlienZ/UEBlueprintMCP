@@ -250,7 +250,10 @@ TSharedPtr<FJsonObject> FFindBlueprintNodesAction::ExecuteInternal(const TShared
 {
 	FString NodeType = GetOptionalString(Params, TEXT("node_type"));
 	FString EventName = GetOptionalString(Params, TEXT("event_name"));
-	const bool bFullDetail = GetOptionalString(Params, TEXT("detail"), TEXT("basic")).Equals(TEXT("full"), ESearchCase::IgnoreCase);
+	const FString Detail = GetOptionalString(Params, TEXT("detail"), TEXT("basic"));
+	const bool bFullDetail = Detail.Equals(TEXT("full"), ESearchCase::IgnoreCase);
+	// compact: one "guid title" string per node (fewest tokens)
+	const bool bCompact = Detail.Equals(TEXT("compact"), ESearchCase::IgnoreCase);
 	const int32 Offset = FMath::Max(0, (int32)GetOptionalNumber(Params, TEXT("offset"), 0));
 	const int32 Limit = FMath::Max(0, (int32)GetOptionalNumber(Params, TEXT("limit"), 0));
 
@@ -330,7 +333,14 @@ TSharedPtr<FJsonObject> FFindBlueprintNodesAction::ExecuteInternal(const TShared
 			{
 				continue;
 			}
-			NodesArray.Add(MakeShared<FJsonValueObject>(FMCPCommonUtils::NodeToJson(Node, bFullDetail)));
+			if (bCompact)
+			{
+				NodesArray.Add(MakeShared<FJsonValueString>(Node->NodeGuid.ToString() + TEXT(" ") + Node->GetNodeTitle(ENodeTitleType::ListView).ToString()));
+			}
+			else
+			{
+				NodesArray.Add(MakeShared<FJsonValueObject>(FMCPCommonUtils::NodeToJson(Node, bFullDetail)));
+			}
 		}
 	}
 
@@ -434,6 +444,188 @@ TSharedPtr<FJsonObject> FGetNodePinsAction::ExecuteInternal(const TSharedPtr<FJs
 	ResultData->SetStringField(TEXT("node_class"), FoundNode->GetClass()->GetName());
 	ResultData->SetStringField(TEXT("node_title"), FoundNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
 	ResultData->SetArrayField(TEXT("pins"), PinsArray);
+	return CreateSuccessResponse(ResultData);
+}
+
+
+bool FSetVariableGetPurityAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	FString NodeId;
+	if (!GetRequiredString(Params, TEXT("node_id"), NodeId, OutError)) return false;
+	return ValidateGraph(Params, Context, OutError);
+}
+
+TSharedPtr<FJsonObject> FSetVariableGetPurityAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	FString NodeId = Params->GetStringField(TEXT("node_id"));
+	bool bPure = false;
+	Params->TryGetBoolField(TEXT("pure"), bPure);
+
+	UBlueprint* Blueprint = GetTargetBlueprint(Params, Context);
+	UEdGraph* TargetGraph = GetTargetGraph(Params, Context);
+
+	UK2Node_VariableGet* GetNode = nullptr;
+	for (UEdGraphNode* Node : TargetGraph->Nodes)
+	{
+		if (Node && Node->NodeGuid.ToString() == NodeId)
+		{
+			GetNode = Cast<UK2Node_VariableGet>(Node);
+			break;
+		}
+	}
+	if (!GetNode)
+	{
+		return CreateErrorResponse(FString::Printf(TEXT("Variable Get node not found with ID: %s"), *NodeId));
+	}
+
+	// Same rule as the editor's context menu: objects/classes -> Validated Get, bool -> Branch
+	const UEdGraphPin* ValuePin = GetNode->GetValuePin();
+	const FEdGraphPinType PinType = ValuePin ? ValuePin->PinType : FEdGraphPinType();
+	FName Variation = TEXT("Pure");
+	if (!bPure && !PinType.IsContainer())
+	{
+		if (PinType.PinCategory == UEdGraphSchema_K2::PC_Boolean)
+		{
+			Variation = TEXT("Branch");
+		}
+		else if (PinType.PinCategory == UEdGraphSchema_K2::PC_Object || PinType.PinCategory == UEdGraphSchema_K2::PC_Class
+			|| PinType.PinCategory == UEdGraphSchema_K2::PC_SoftObject || PinType.PinCategory == UEdGraphSchema_K2::PC_SoftClass)
+		{
+			Variation = TEXT("ValidatedObject");
+		}
+	}
+	if (!bPure && Variation == TEXT("Pure"))
+	{
+		return CreateErrorResponse(TEXT("Only object, class or bool variables (not arrays) can be a Validated Get"));
+	}
+	if (!bPure && !GetDefault<UEdGraphSchema_K2>()->DoesGraphSupportImpureFunctions(TargetGraph))
+	{
+		return CreateErrorResponse(TEXT("This graph does not support impure nodes"));
+	}
+
+	// UK2Node_VariableGet::SetPurity is not exported, so set the CurrentVariation property and rebuild the pins
+	// (what TogglePurity does); links on the value pin are kept by ReconstructNode.
+	FEnumProperty* VariationProperty = FindFProperty<FEnumProperty>(UK2Node_VariableGet::StaticClass(), TEXT("CurrentVariation"));
+	if (!VariationProperty)
+	{
+		return CreateErrorResponse(TEXT("CurrentVariation property not found on UK2Node_VariableGet"));
+	}
+	const int64 Value = VariationProperty->GetEnum()->GetValueByName(Variation);
+	GetNode->Modify();
+	VariationProperty->GetUnderlyingProperty()->SetIntPropertyValue(VariationProperty->ContainerPtrToValuePtr<void>(GetNode), Value);
+	GetNode->ReconstructNode();
+	MarkBlueprintModified(Blueprint, Context);
+
+	TArray<TSharedPtr<FJsonValue>> PinsArray;
+	for (UEdGraphPin* Pin : GetNode->Pins)
+	{
+		if (Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Exec)
+		{
+			PinsArray.Add(MakeShared<FJsonValueString>(Pin->PinName.ToString()));
+		}
+	}
+
+	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
+	ResultData->SetStringField(TEXT("node_id"), NodeId);
+	ResultData->SetStringField(TEXT("variation"), Variation.ToString());
+	ResultData->SetArrayField(TEXT("exec_pins"), PinsArray);
+	return CreateSuccessResponse(ResultData);
+}
+
+
+// User struct pins are named "Field_12_<32 hex guid>"; drop the suffix to keep the output short.
+static FString ShortPinName(const UEdGraphPin* Pin)
+{
+	FString Name = Pin->PinName.ToString();
+	if (Name.Len() > 33 && Name[Name.Len() - 33] == TEXT('_'))
+	{
+		const FString Guid = Name.Right(32);
+		bool bHex = true;
+		for (TCHAR Char : Guid)
+		{
+			bHex &= FChar::IsHexDigit(Char);
+		}
+		if (bHex)
+		{
+			Name.LeftInline(Name.Len() - 33);
+			int32 Underscore;
+			if (Name.FindLastChar(TEXT('_'), Underscore) && Name.Mid(Underscore + 1).IsNumeric())
+			{
+				Name.LeftInline(Underscore);
+			}
+		}
+	}
+	return Name;
+}
+
+bool FGetGraphConnectionsAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	return ValidateGraph(Params, Context, OutError);
+}
+
+TSharedPtr<FJsonObject> FGetGraphConnectionsAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	UBlueprint* Blueprint = GetTargetBlueprint(Params, Context);
+	UEdGraph* TargetGraph = GetTargetGraph(Params, Context);
+
+	// Compact form: nodes are numbered, links are "from.pin>to.pin" (output to input),
+	// defaults are "node.pin=value" for unlinked input pins with a value.
+	TMap<UEdGraphNode*, int32> NodeIndex;
+	TArray<TSharedPtr<FJsonValue>> NodesArray;
+	for (UEdGraphNode* Node : TargetGraph->Nodes)
+	{
+		if (!Node) continue;
+		NodeIndex.Add(Node, NodesArray.Num());
+		FString Title = Node->GetNodeTitle(ENodeTitleType::ListView).ToString();
+		if (UEdGraphNode_Comment* Comment = Cast<UEdGraphNode_Comment>(Node))
+		{
+			Title = TEXT("// ") + Comment->NodeComment;
+		}
+		NodesArray.Add(MakeShared<FJsonValueString>(FString::Printf(TEXT("%d %s | %s"), NodesArray.Num(), *Title, *Node->NodeGuid.ToString())));
+	}
+
+	TArray<TSharedPtr<FJsonValue>> LinksArray;
+	TArray<TSharedPtr<FJsonValue>> DefaultsArray;
+	for (UEdGraphNode* Node : TargetGraph->Nodes)
+	{
+		if (!Node) continue;
+		const int32 From = NodeIndex[Node];
+		for (UEdGraphPin* Pin : Node->Pins)
+		{
+			if (Pin->Direction == EGPD_Output)
+			{
+				for (UEdGraphPin* Linked : Pin->LinkedTo)
+				{
+					const int32* To = Linked ? NodeIndex.Find(Linked->GetOwningNodeUnchecked()) : nullptr;
+					if (!To) continue;
+					LinksArray.Add(MakeShared<FJsonValueString>(FString::Printf(TEXT("%d.%s>%d.%s"), From, *ShortPinName(Pin), *To, *ShortPinName(Linked))));
+				}
+			}
+			else if (Pin->LinkedTo.Num() == 0 && !Pin->bHidden && Pin->PinType.PinCategory != UEdGraphSchema_K2::PC_Exec)
+			{
+				FString DefaultValue = Pin->GetDefaultAsString();
+				if (!DefaultValue.IsEmpty())
+				{
+					DefaultsArray.Add(MakeShared<FJsonValueString>(FString::Printf(TEXT("%d.%s=%s"), From, *ShortPinName(Pin), *DefaultValue)));
+				}
+			}
+		}
+	}
+
+	TArray<TSharedPtr<FJsonValue>> GraphsArray;
+	TArray<UEdGraph*> AllGraphs;
+	Blueprint->GetAllGraphs(AllGraphs);
+	for (UEdGraph* Graph : AllGraphs)
+	{
+		if (Graph) GraphsArray.Add(MakeShared<FJsonValueString>(Graph->GetName()));
+	}
+
+	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
+	ResultData->SetStringField(TEXT("graph"), TargetGraph->GetName());
+	ResultData->SetArrayField(TEXT("graphs"), GraphsArray);
+	ResultData->SetArrayField(TEXT("nodes"), NodesArray);
+	ResultData->SetArrayField(TEXT("links"), LinksArray);
+	ResultData->SetArrayField(TEXT("defaults"), DefaultsArray);
 	return CreateSuccessResponse(ResultData);
 }
 

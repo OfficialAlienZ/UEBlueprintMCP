@@ -114,6 +114,23 @@ void FMCPServer::Stop()
 		Thread = nullptr;
 	}
 
+	// Wait for client threads. A client may be waiting on a game thread task, so keep pumping it.
+	TArray<TFuture<void>> Tasks;
+	{
+		FScopeLock Lock(&ClientTasksLock);
+		Tasks = MoveTemp(ClientTasks);
+	}
+	for (TFuture<void>& Task : Tasks)
+	{
+		while (!Task.WaitFor(FTimespan::FromMilliseconds(10)))
+		{
+			if (IsInGameThread())
+			{
+				FTaskGraphInterface::Get().ProcessThreadUntilIdle(ENamedThreads::GameThread);
+			}
+		}
+	}
+
 	if (ListenerSocket)
 	{
 		ISocketSubsystem* SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
@@ -148,15 +165,23 @@ uint32 FMCPServer::Run()
 				FSocket* ClientSocket = ListenerSocket->Accept(TEXT("UEBlueprintMCP Client"));
 				if (ClientSocket)
 				{
+					// Each client gets its own thread, so a client that stays connected (the MCP server
+					// with its heartbeat) no longer blocks others (e.g. a second MCP client or a script).
+					// Commands still run one at a time on the game thread.
 					UE_LOG(LogTemp, Log, TEXT("UEBlueprintMCP: Client connected"));
-					HandleClient(ClientSocket);
-					UE_LOG(LogTemp, Log, TEXT("UEBlueprintMCP: Client disconnected"));
-
-					ISocketSubsystem* SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
-					if (SocketSubsystem)
+					FScopeLock Lock(&ClientTasksLock);
+					ClientTasks.RemoveAll([](const TFuture<void>& Task) { return Task.IsReady(); });
+					ClientTasks.Add(Async(EAsyncExecution::Thread, [this, ClientSocket]()
 					{
-						SocketSubsystem->DestroySocket(ClientSocket);
-					}
+						HandleClient(ClientSocket);
+						UE_LOG(LogTemp, Log, TEXT("UEBlueprintMCP: Client disconnected"));
+
+						ISocketSubsystem* SocketSubsystem = ISocketSubsystem::Get(PLATFORM_SOCKETSUBSYSTEM);
+						if (SocketSubsystem)
+						{
+							SocketSubsystem->DestroySocket(ClientSocket);
+						}
+					}));
 				}
 			}
 		}

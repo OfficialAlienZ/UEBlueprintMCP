@@ -16,7 +16,7 @@ def _send_command_sync(command_type: str, params: dict | None = None) -> list[Te
     if not conn.is_connected:
         conn.connect()
     result = conn.send_command(command_type, params)
-    return [TextContent(type="text", text=json.dumps(result.to_dict(), indent=2))]
+    return [TextContent(type="text", text=json.dumps(result.to_dict(), separators=(',', ':')))]
 
 
 async def _send_command(command_type: str, params: dict | None = None) -> list[TextContent]:
@@ -52,7 +52,8 @@ def get_tools() -> list[Tool]:
                     "position": {"type": "array", "items": {"type": "number"}, "description": "[X, Y] position"},
                     "size": {"type": "array", "items": {"type": "number"}, "description": "[Width, Height]"},
                     "font_size": {"type": "integer", "description": "Font size in points"},
-                    "color": {"type": "array", "items": {"type": "number"}, "description": "[R, G, B, A] values 0.0-1.0"}
+                    "color": {"type": "array", "items": {"type": "number"}, "description": "[R, G, B, A] values 0.0-1.0"},
+                    "parent_name": {"type": "string", "description": "Optional panel to add it to (e.g. one page of a widget switcher); default is the root canvas"}
                 },
                 "required": ["widget_name", "text_block_name"]
             }

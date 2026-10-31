@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "Dom/JsonObject.h"
+#include "MCPCompat.h"
 #include "Engine/Blueprint.h"
 #include "Materials/Material.h"
 #include "Materials/MaterialExpression.h"
@@ -80,7 +81,7 @@ public:
 
 private:
 	/** Handle of the pending deferred-save ticker (invalid when no save is pending) */
-	FDelegateHandle SaveTickerHandle;
+	MCPCompat::FTickerHandle SaveTickerHandle;
 
 	/** FPlatformTime::Seconds() when the oldest unsaved request was made */
 	double PendingSaveSince = 0.0;

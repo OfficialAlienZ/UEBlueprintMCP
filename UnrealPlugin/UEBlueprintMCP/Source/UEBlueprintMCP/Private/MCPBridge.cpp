@@ -117,6 +117,7 @@ void UMCPBridge::RegisterActions()
 	ActionHandlers.Add(TEXT("get_viewport_transform"), MakeShared<FGetViewportTransformAction>());
 	ActionHandlers.Add(TEXT("set_viewport_transform"), MakeShared<FSetViewportTransformAction>());
 	ActionHandlers.Add(TEXT("save_all"), MakeShared<FSaveAllAction>());
+	ActionHandlers.Add(TEXT("set_asset_property"), MakeShared<FSetAssetPropertyAction>());
 
 	// =========================================================================
 	// PIE / Runtime Feedback Actions
@@ -143,6 +144,8 @@ void UMCPBridge::RegisterActions()
 	ActionHandlers.Add(TEXT("find_blueprint_nodes"), MakeShared<FFindBlueprintNodesAction>());
 	ActionHandlers.Add(TEXT("delete_blueprint_node"), MakeShared<FDeleteBlueprintNodeAction>());
 	ActionHandlers.Add(TEXT("get_node_pins"), MakeShared<FGetNodePinsAction>());
+	ActionHandlers.Add(TEXT("get_graph_connections"), MakeShared<FGetGraphConnectionsAction>());
+	ActionHandlers.Add(TEXT("convert_to_validated_get"), MakeShared<FSetVariableGetPurityAction>());
 	ActionHandlers.Add(TEXT("set_node_position"), MakeShared<FSetNodePositionAction>());
 
 	// =========================================================================
@@ -242,8 +245,134 @@ TSharedRef<FEditorAction>* UMCPBridge::FindAction(const FString& CommandType)
 	return ActionHandlers.Find(CommandType);
 }
 
+namespace
+{
+	// Actions answer either {"success": true, ...} or {"status": "success", "result": {...}}
+	bool IsSuccessResponse(const TSharedPtr<FJsonObject>& Response)
+	{
+		bool bSuccess = false;
+		FString Status;
+		return Response.IsValid()
+			&& ((Response->TryGetBoolField(TEXT("success"), bSuccess) && bSuccess)
+				|| (Response->TryGetStringField(TEXT("status"), Status) && Status == TEXT("success")));
+	}
+
+	TSharedPtr<FJsonValue> FindResultField(const TSharedPtr<FJsonObject>& Response, const FString& Field)
+	{
+		if (TSharedPtr<FJsonValue> Value = Response->TryGetField(Field))
+		{
+			return Value;
+		}
+		const TSharedPtr<FJsonObject>* Result;
+		return Response->TryGetObjectField(TEXT("result"), Result) ? (*Result)->TryGetField(Field) : nullptr;
+	}
+
+	// Replaces string values "$N.field" by that field of the result of command N
+	TSharedPtr<FJsonValue> ResolveReferences(const TSharedPtr<FJsonValue>& Value, const TArray<TSharedPtr<FJsonObject>>& Results, FString& OutError)
+	{
+		FString String;
+		if (Value->TryGetString(String) && String.StartsWith(TEXT("$")))
+		{
+			FString Index, Field;
+			if (String.Mid(1).Split(TEXT("."), &Index, &Field) && Index.IsNumeric())
+			{
+				const int32 ResultIndex = FCString::Atoi(*Index);
+				TSharedPtr<FJsonValue> Found = Results.IsValidIndex(ResultIndex) ? FindResultField(Results[ResultIndex], Field) : nullptr;
+				if (!Found)
+				{
+					OutError = FString::Printf(TEXT("Reference '%s' not found"), *String);
+					return Value;
+				}
+				return Found;
+			}
+		}
+		const TArray<TSharedPtr<FJsonValue>>* Array;
+		if (Value->TryGetArray(Array))
+		{
+			TArray<TSharedPtr<FJsonValue>> NewArray;
+			for (const TSharedPtr<FJsonValue>& Item : *Array)
+			{
+				NewArray.Add(ResolveReferences(Item, Results, OutError));
+			}
+			return MakeShared<FJsonValueArray>(NewArray);
+		}
+		const TSharedPtr<FJsonObject>* Object;
+		if (Value->TryGetObject(Object))
+		{
+			TSharedPtr<FJsonObject> NewObject = MakeShared<FJsonObject>();
+			for (const TPair<FString, TSharedPtr<FJsonValue>>& Pair : (*Object)->Values)
+			{
+				NewObject->SetField(Pair.Key, ResolveReferences(Pair.Value, Results, OutError));
+			}
+			return MakeShared<FJsonValueObject>(NewObject);
+		}
+		return Value;
+	}
+}
+
+TSharedPtr<FJsonObject> UMCPBridge::ExecuteBatch(const TSharedPtr<FJsonObject>& Params)
+{
+	const TArray<TSharedPtr<FJsonValue>>* Commands;
+	if (!Params.IsValid() || !Params->TryGetArrayField(TEXT("commands"), Commands))
+	{
+		return CreateErrorResponse(TEXT("batch needs 'commands': [{\"type\": ..., \"params\": {...}}, ...]"), TEXT("validation_failed"));
+	}
+	bool bStopOnError = true;
+	Params->TryGetBoolField(TEXT("stop_on_error"), bStopOnError);
+
+	TArray<TSharedPtr<FJsonObject>> Results;
+	TArray<TSharedPtr<FJsonValue>> ResultsArray;
+	int32 Failed = 0;
+	for (const TSharedPtr<FJsonValue>& CommandValue : *Commands)
+	{
+		const TSharedPtr<FJsonObject>* Command;
+		FString Type;
+		TSharedPtr<FJsonObject> Response;
+		if (!CommandValue->TryGetObject(Command) || !(*Command)->TryGetStringField(TEXT("type"), Type) || Type == TEXT("batch"))
+		{
+			Response = CreateErrorResponse(TEXT("Each command needs a 'type' (no nested batch)"), TEXT("validation_failed"));
+		}
+		else
+		{
+			const TSharedPtr<FJsonObject>* CommandParams;
+			TSharedPtr<FJsonObject> Resolved = MakeShared<FJsonObject>();
+			FString Error;
+			if ((*Command)->TryGetObjectField(TEXT("params"), CommandParams))
+			{
+				Resolved = ResolveReferences(MakeShared<FJsonValueObject>(*CommandParams), Results, Error)->AsObject();
+			}
+			Response = Error.IsEmpty() ? ExecuteCommandSafe(Type, Resolved) : CreateErrorResponse(Error, TEXT("validation_failed"));
+		}
+
+		Results.Add(Response);
+		ResultsArray.Add(MakeShared<FJsonValueObject>(Response));
+		if (!IsSuccessResponse(Response))
+		{
+			++Failed;
+			if (bStopOnError) break;
+		}
+	}
+
+	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
+	ResultData->SetNumberField(TEXT("executed"), Results.Num());
+	ResultData->SetNumberField(TEXT("failed"), Failed);
+	ResultData->SetArrayField(TEXT("results"), ResultsArray);
+	if (Failed == 0)
+	{
+		return CreateSuccessResponse(ResultData);
+	}
+	TSharedPtr<FJsonObject> Response = CreateErrorResponse(FString::Printf(TEXT("%d command(s) failed, see results"), Failed), TEXT("batch_failed"));
+	Response->SetObjectField(TEXT("result"), ResultData);
+	return Response;
+}
+
 TSharedPtr<FJsonObject> UMCPBridge::ExecuteCommand(const FString& CommandType, const TSharedPtr<FJsonObject>& Params)
 {
+	if (CommandType == TEXT("batch"))
+	{
+		return ExecuteBatch(Params);
+	}
+
 	// =========================================================================
 	// Action Handlers (modular actions - check these first)
 	// =========================================================================

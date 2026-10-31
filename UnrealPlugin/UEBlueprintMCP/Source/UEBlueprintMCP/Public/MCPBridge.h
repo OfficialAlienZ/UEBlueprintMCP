@@ -78,6 +78,9 @@ private:
 	/** Find action handler for a command type */
 	TSharedRef<FEditorAction>* FindAction(const FString& CommandType);
 
+	/** Run several commands in one call ("batch"); "$N.field" strings are replaced by field of result N */
+	TSharedPtr<FJsonObject> ExecuteBatch(const TSharedPtr<FJsonObject>& Params);
+
 	/** Execute internal command (called after validation) */
 	TSharedPtr<FJsonObject> ExecuteCommandInternal(const FString& CommandType, const TSharedPtr<FJsonObject>& Params);
 

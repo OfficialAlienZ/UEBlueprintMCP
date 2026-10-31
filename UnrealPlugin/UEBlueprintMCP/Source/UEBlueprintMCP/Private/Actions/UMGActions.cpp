@@ -40,7 +40,8 @@ static UWidgetBlueprint* FindWidgetBlueprintByName(const FString& BlueprintName)
 			}
 		}
 	}
-	return nullptr;
+	// Anywhere else: a name found by the asset registry, or a full path such as /Game/TopDown/Widgets/Menu
+	return Cast<UWidgetBlueprint>(FMCPCommonUtils::FindBlueprint(BlueprintName));
 }
 
 // =============================================================================
@@ -228,15 +229,56 @@ TSharedPtr<FJsonObject> FAddTextBlockToWidgetAction::ExecuteInternal(const TShar
 
 	TextBlock->SetText(FText::FromString(InitialText));
 
-	// Add to canvas
-	UCanvasPanel* RootCanvas = Cast<UCanvasPanel>(WidgetBlueprint->WidgetTree->RootWidget);
-	if (!RootCanvas)
+	double FontSize = 0.0;
+	if (Params->TryGetNumberField(TEXT("font_size"), FontSize) && FontSize > 0.0)
 	{
-		return FMCPCommonUtils::CreateErrorResponse(TEXT("Root Canvas Panel not found"));
+		FSlateFontInfo Font = TextBlock->GetFont();
+		Font.Size = FontSize;
+		TextBlock->SetFont(Font);
+	}
+	const TArray<TSharedPtr<FJsonValue>>* ColorArray;
+	if (Params->TryGetArrayField(TEXT("color"), ColorArray) && ColorArray->Num() >= 3)
+	{
+		const float Alpha = ColorArray->Num() >= 4 ? (*ColorArray)[3]->AsNumber() : 1.f;
+		TextBlock->SetColorAndOpacity(FSlateColor(FLinearColor((*ColorArray)[0]->AsNumber(), (*ColorArray)[1]->AsNumber(), (*ColorArray)[2]->AsNumber(), Alpha)));
 	}
 
-	UCanvasPanelSlot* PanelSlot = RootCanvas->AddChildToCanvas(TextBlock);
-	PanelSlot->SetPosition(Position);
+	// Add to the root canvas, or to the panel named by parent_name (e.g. one page of a widget switcher)
+	UPanelWidget* Parent = Cast<UPanelWidget>(WidgetBlueprint->WidgetTree->RootWidget);
+	FString ParentName;
+	if (Params->TryGetStringField(TEXT("parent_name"), ParentName) && !ParentName.IsEmpty())
+	{
+		Parent = Cast<UPanelWidget>(WidgetBlueprint->WidgetTree->FindWidget(FName(*ParentName)));
+		if (!Parent)
+		{
+			return FMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Panel '%s' not found"), *ParentName));
+		}
+	}
+	if (!Parent)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(TEXT("Root panel not found"));
+	}
+
+	if (UCanvasPanel* Canvas = Cast<UCanvasPanel>(Parent))
+	{
+		UCanvasPanelSlot* PanelSlot = Canvas->AddChildToCanvas(TextBlock);
+		PanelSlot->SetPosition(Position);
+		const TArray<TSharedPtr<FJsonValue>>* SizeArray;
+		if (Params->TryGetArrayField(TEXT("size"), SizeArray) && SizeArray->Num() >= 2)
+		{
+			PanelSlot->SetSize(FVector2D((*SizeArray)[0]->AsNumber(), (*SizeArray)[1]->AsNumber()));
+		}
+		else
+		{
+			PanelSlot->SetAutoSize(true);
+		}
+	}
+	else
+	{
+		Parent->AddChild(TextBlock);
+	}
+	// Exposed as a variable so the graph can set its text
+	TextBlock->bIsVariable = true;
 
 	// Compile and save
 	FKismetEditorUtilities::CompileBlueprint(WidgetBlueprint);
