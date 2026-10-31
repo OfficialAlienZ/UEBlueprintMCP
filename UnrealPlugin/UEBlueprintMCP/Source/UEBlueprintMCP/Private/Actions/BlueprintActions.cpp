@@ -135,6 +135,15 @@ UClass* FCreateBlueprintAction::ResolveParentClass(const FString& ParentClassNam
 		return APlayerController::StaticClass();
 	}
 
+	// A full class path (e.g. /Script/MyProject.MyActor or /Game/Path/BP_Parent.BP_Parent_C)
+	if (ParentClassName.Contains(TEXT("/")))
+	{
+		if (UClass* FoundClass = LoadClass<AActor>(nullptr, *ParentClassName))
+		{
+			return FoundClass;
+		}
+	}
+
 	// Build name variants
 	FString ClassName = ParentClassName;
 	if (!ClassName.StartsWith(TEXT("A")))
@@ -456,6 +465,12 @@ TSharedPtr<FJsonObject> FAddComponentToBlueprintAction::ExecuteInternal(const TS
 
 UClass* FAddComponentToBlueprintAction::ResolveComponentClass(const FString& ComponentTypeName) const
 {
+	// A full class path (e.g. /Script/GeometryCollectionEngine.GeometryCollectionComponent or a Blueprint component)
+	if (ComponentTypeName.Contains(TEXT("/")))
+	{
+		return LoadClass<UActorComponent>(nullptr, *ComponentTypeName);
+	}
+
 	// Build candidate names
 	TArray<FString> Candidates;
 	Candidates.Add(ComponentTypeName);
@@ -478,7 +493,9 @@ UClass* FAddComponentToBlueprintAction::ResolveComponentClass(const FString& Com
 		TEXT("/Script/Engine"),
 		TEXT("/Script/UMG"),
 		TEXT("/Script/AIModule"),
-		TEXT("/Script/NavigationSystem")
+		TEXT("/Script/NavigationSystem"),
+		TEXT("/Script/GeometryCollectionEngine"),
+		TEXT("/Script/Niagara")
 	};
 
 	for (const FString& Candidate : Candidates)

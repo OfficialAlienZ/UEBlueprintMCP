@@ -117,6 +117,7 @@ void UMCPBridge::RegisterActions()
 	ActionHandlers.Add(TEXT("get_viewport_transform"), MakeShared<FGetViewportTransformAction>());
 	ActionHandlers.Add(TEXT("set_viewport_transform"), MakeShared<FSetViewportTransformAction>());
 	ActionHandlers.Add(TEXT("save_all"), MakeShared<FSaveAllAction>());
+	ActionHandlers.Add(TEXT("set_asset_property"), MakeShared<FSetAssetPropertyAction>());
 
 	// =========================================================================
 	// PIE / Runtime Feedback Actions

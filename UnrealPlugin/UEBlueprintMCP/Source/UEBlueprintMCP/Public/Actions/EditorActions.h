@@ -189,6 +189,19 @@ protected:
  * FSaveAllAction
  * Saves all dirty packages (blueprints, levels, assets).
  */
+/** Set a property on any asset (or other object) by path, e.g. a Static Mesh's NaniteSettings, with editor change notification */
+class UEBLUEPRINTMCP_API FSetAssetPropertyAction : public FEditorAction
+{
+public:
+	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
+
+protected:
+	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
+	virtual FString GetActionName() const override { return TEXT("set_asset_property"); }
+	virtual bool BlocksDuringPIE() const override { return true; }
+};
+
+
 class UEBLUEPRINTMCP_API FSaveAllAction : public FEditorAction
 {
 public:
