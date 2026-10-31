@@ -9,6 +9,7 @@
 #include "EdGraphSchema_K2.h"
 #include "K2Node.h"
 #include "K2Node_FunctionEntry.h"
+#include "K2Node_Knot.h"
 
 namespace
 {
@@ -294,6 +295,33 @@ namespace
 	}
 
 	/**
+	 * Reroute nodes are only wire waypoints, so when a node ends up in front of one of them the reroute
+	 * gives way: every pre-existing reroute node wired to Node's outputs that is not clearly to its right
+	 * is moved right of it, in line with the connected pin.
+	 */
+	void PushRerouteNodesRight(const FMCPEditorContext& Context, const UEdGraphNode* Node)
+	{
+		const FVector2D Pos = NodePos(Node);
+		const FVector2D Size = ComputeMetrics(Node).Size;
+		for (const UEdGraphPin* Pin : Node->Pins)
+		{
+			if (!Pin || Pin->Direction != EGPD_Output)
+			{
+				continue;
+			}
+			for (const UEdGraphPin* Linked : Pin->LinkedTo)
+			{
+				UEdGraphNode* Knot = Linked ? Cast<UK2Node_Knot>(Linked->GetOwningNode()) : nullptr;
+				if (!Knot || Context.AutoPlacedNodes.Contains(Knot->NodeGuid) || NodePos(Knot).X >= Pos.X + Size.X + HGap * 0.5f)
+				{
+					continue;
+				}
+				SetNodePos(Knot, SnapToGrid(FVector2D(Pos.X + Size.X + HGap, Pos.Y + PinOffsetY(Node, Pin) - PinOffsetY(Knot, Linked))));
+			}
+		}
+	}
+
+	/**
 	 * Nodes that must move together with Mover: auto-placed pure nodes feeding it (transitively) and, for flow nodes,
 	 * the auto-placed nodes chained behind its exec outputs together with their pure inputs. Nodes in Visited
 	 * (e.g. the node Mover was just wired to) are never touched.
@@ -448,6 +476,13 @@ void FMCPNodeLayout::OnPinsConnected(UEdGraphPin* OutputPin, UEdGraphPin* InputP
 		return;
 	}
 
+	// A node that is already in place keeps its spot; a reroute node it is wired to moves out of its way
+	if (bSourceSettled && !bTargetAuto && Cast<UK2Node_Knot>(Target))
+	{
+		PushRerouteNodesRight(Context, Source);
+		return;
+	}
+
 	const bool bSourcePure = IsPureNode(Source);
 	const FVector2D SourcePos = NodePos(Source);
 	const FVector2D SourceSize = ComputeMetrics(Source).Size;
@@ -506,6 +541,10 @@ void FMCPNodeLayout::OnPinsConnected(UEdGraphPin* OutputPin, UEdGraphPin* InputP
 	for (UEdGraphNode* Member : Cluster)
 	{
 		SetNodePos(Member, NodePos(Member) + Delta);
+	}
+	for (const UEdGraphNode* Member : Cluster)
+	{
+		PushRerouteNodesRight(Context, Member);
 	}
 
 	Context.AutoPlacedNodes.Add(Mover->NodeGuid, true);
