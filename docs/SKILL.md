@@ -18,6 +18,7 @@ This skill provides specialized knowledge for working with Unreal Engine Bluepri
 ### Blueprint Creation & Management
 - `create_blueprint` - Create new Blueprint class (supports parent: Actor, Pawn, PlayerController, GameModeBase, GameStateBase)
 - `compile_blueprint` - Compile and auto-save; returns error_count, warning_count, detailed errors with node IDs
+- `find_in_blueprints` - Global text search across all Blueprint assets (like the editor's "Find in Blueprints"): node titles (e.g. `Set Health`), function/variable/event/macro/cast-target names and owner classes, node comments, unlinked input-pin default values, Blueprint variables and graph names. Results are grouped per Blueprint; node matches carry `node_guid`, `graph`, `matched_on` (usable with `get_node_pins` / `find_blueprint_nodes`). Params: `query`, `path` (default `/Game`), `scope` (`nodes`, `pin_defaults`, `pins`, `variables`, `graphs`), `case_sensitive`, `limit` (default 50), `time_budget_seconds` (default 10). Blueprints are loaded on demand; if `complete=false`, repeat with `offset=next_offset`. Narrow `path` for speed.
 - `find_blueprint_nodes` - List nodes in a graph (guid, class, title, position, comment, plus function_name/function_owner, variable_name, event_name, macro_name, cast_target). `detail="full"` adds every pin with defaults and `linked_to` connections (enough to trace execution flow). Filters: `node_type` (Event/Function/Variable/Macro/Cast/Comment), `event_name`; paging: `limit`/`offset`. `graph_name` accepts function, macro, event dispatcher signature, interface and collapsed graphs
 - `delete_blueprint_node` - Remove a node by GUID; supports `graph_name` for function graphs
 - `get_node_pins` - List all pins on a node with type, default value and `linked_to` connections; supports `graph_name`
@@ -73,7 +74,7 @@ This skill provides specialized knowledge for working with Unreal Engine Bluepri
 - `add_blueprint_self_reference` - Get reference to self
 - `add_blueprint_get_self_component_reference` - Get reference to owned component
 - `add_blueprint_get_subsystem_node` - Get typed subsystem from PlayerController (K2Node_GetSubsystemFromPC)
-- `add_blueprint_cast_node` - Dynamic cast to Blueprint or Engine class
+- `add_blueprint_cast_node` - Dynamic cast to Blueprint or Engine class (`graph_name` places it in a function graph; also supported by branch, self-reference and component-reference nodes)
 - `add_blueprint_branch_node` - If/Then/Else branch
 - `add_spawn_actor_from_class_node` - Spawn actor at runtime (accepts blueprint name like 'BP_Enemy' or class name)
 - `call_blueprint_function` - Call custom Blueprint function (target_blueprint must be compiled)

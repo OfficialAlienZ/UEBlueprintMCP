@@ -439,6 +439,35 @@ def get_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="find_in_blueprints",
+            description=(
+                "Text search across ALL Blueprint assets (like the editor's global 'Find in Blueprints'). "
+                "Case-insensitive substring match on node titles (e.g. 'Set Health'), function / variable / event / "
+                "macro / cast-target names and their owner classes, node comments, default values of unlinked input "
+                "pins (e.g. log strings, class refs), Blueprint variables and graph names. Results are grouped per "
+                "Blueprint; node matches include node_guid, graph and matched_on, ready for get_node_pins / "
+                "find_blueprint_nodes. Blueprints are loaded on demand, so the scan is bounded by a time budget: "
+                "if the response has complete=false, call again with offset=next_offset. Narrow with 'path' to be fast."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "query": {"type": "string", "description": "Text to find (substring)"},
+                    "path": {"type": "string", "description": "Package path prefix, recursive (default /Game), e.g. /Game/Blueprints"},
+                    "scope": {
+                        "type": "array",
+                        "items": {"type": "string", "enum": ["nodes", "pin_defaults", "pins", "variables", "graphs"]},
+                        "description": "What to search (default nodes, pin_defaults, variables, graphs). 'pins' matches pin names / pin type classes (noisy)"
+                    },
+                    "case_sensitive": {"type": "boolean", "description": "Default false"},
+                    "limit": {"type": "integer", "description": "Stop starting new Blueprints once this many matches are found (default 50)"},
+                    "offset": {"type": "integer", "description": "Index of the first Blueprint to scan; use next_offset from the previous response"},
+                    "time_budget_seconds": {"type": "number", "description": "Scan time budget per call (default 10, max 18)"}
+                },
+                "required": ["query"]
+            }
+        ),
+        Tool(
             name="delete_blueprint_node",
             description="Delete a node from a Blueprint's graph.",
             inputSchema={
@@ -513,6 +542,7 @@ TOOL_HANDLERS = {
     # Graph Operations
     "connect_blueprint_nodes": "connect_blueprint_nodes",
     "find_blueprint_nodes": "find_blueprint_nodes",
+    "find_in_blueprints": "find_in_blueprints",
     "delete_blueprint_node": "delete_blueprint_node",
     "get_node_pins": "get_node_pins",
     "set_node_position": "set_node_position",

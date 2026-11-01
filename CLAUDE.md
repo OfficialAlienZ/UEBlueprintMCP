@@ -37,6 +37,7 @@ UEBlueprintMCP/
 │       │       ├── InspectionActions.h  # Read-only introspection (get_blueprint_info)
 │       │       ├── AIActions.h          # Behavior Tree / Blackboard introspection
 │       │       ├── AssetInspectionActions.h # Enum / Curve / Data Table introspection
+│       │       ├── SearchActions.h      # find_in_blueprints (global text search across Blueprint assets)
 │       │       ├── ObjectInspectionActions.h # get_object_properties (full UPROPERTY export), get_project_config (ini)
 │       │       ├── PIEActions.h         # PIE start/stop/status, Output Log, console commands
 │       │       ├── GameplayActions.h    # Runtime gameplay driving in PIE (call_actor_function, inject_input)
@@ -61,6 +62,7 @@ UEBlueprintMCP/
 │               ├── InspectionActions.cpp
 │               ├── AIActions.cpp
 │               ├── AssetInspectionActions.cpp
+│               ├── SearchActions.cpp
 │               ├── ObjectInspectionActions.cpp
 │               ├── PIEActions.cpp
 │               ├── GameplayActions.cpp
