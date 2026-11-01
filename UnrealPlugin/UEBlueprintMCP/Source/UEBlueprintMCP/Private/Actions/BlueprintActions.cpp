@@ -6,7 +6,13 @@
 #include "Engine/BlueprintGeneratedClass.h"
 #include "Engine/SimpleConstructionScript.h"
 #include "Engine/SCS_Node.h"
+#include "WidgetBlueprint.h"
+#include "Blueprint/WidgetTree.h"
+#include "Components/Widget.h"
 #include "Engine/World.h"
+#include "WidgetBlueprint.h"
+#include "Blueprint/WidgetTree.h"
+#include "Components/Widget.h"
 #include "Engine/StaticMesh.h"
 #include "GameFramework/Actor.h"
 #include "GameFramework/Pawn.h"
@@ -707,20 +713,38 @@ TSharedPtr<FJsonObject> FSetComponentPropertyAction::ExecuteInternal(const TShar
 	GetRequiredString(Params, TEXT("component_name"), ComponentName, Error);
 	GetRequiredString(Params, TEXT("property_name"), PropertyName, Error);
 
-	// Find component node
-	USCS_Node* ComponentNode = FMCPCommonUtils::FindComponentNode(Blueprint, ComponentName);
-	if (!ComponentNode)
+	// Widget Blueprints: the target is a widget in the WidgetTree (e.g. bIsVariable, Visibility)
+	UWidgetBlueprint* WidgetBlueprint = Cast<UWidgetBlueprint>(Blueprint);
+	UObject* ComponentTemplate = nullptr;
+	if (WidgetBlueprint)
 	{
-		return CreateErrorResponse(
-			FString::Printf(TEXT("Component not found: %s"), *ComponentName),
-			TEXT("component_not_found")
-		);
+		UWidget* Widget = WidgetBlueprint->WidgetTree ? WidgetBlueprint->WidgetTree->FindWidget(FName(*ComponentName)) : nullptr;
+		if (!Widget)
+		{
+			return CreateErrorResponse(
+				FString::Printf(TEXT("Widget not found in '%s': %s"), *Blueprint->GetName(), *ComponentName),
+				TEXT("component_not_found")
+			);
+		}
+		ComponentTemplate = Widget;
 	}
-
-	UObject* ComponentTemplate = ComponentNode->ComponentTemplate;
-	if (!ComponentTemplate)
+	else
 	{
-		return CreateErrorResponse(TEXT("Invalid component template"), TEXT("invalid_template"));
+		// Find component node
+		USCS_Node* ComponentNode = FMCPCommonUtils::FindComponentNode(Blueprint, ComponentName);
+		if (!ComponentNode)
+		{
+			return CreateErrorResponse(
+				FString::Printf(TEXT("Component not found: %s"), *ComponentName),
+				TEXT("component_not_found")
+			);
+		}
+
+		ComponentTemplate = ComponentNode->ComponentTemplate;
+		if (!ComponentTemplate)
+		{
+			return CreateErrorResponse(TEXT("Invalid component template"), TEXT("invalid_template"));
+		}
 	}
 
 	// Get the value
@@ -734,6 +758,12 @@ TSharedPtr<FJsonObject> FSetComponentPropertyAction::ExecuteInternal(const TShar
 	}
 
 	MarkBlueprintModified(Blueprint, Context);
+
+	// Is Variable adds/removes a member variable, so the Blueprint needs a structural update
+	if (WidgetBlueprint && PropertyName == TEXT("bIsVariable"))
+	{
+		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	}
 
 	UE_LOG(LogTemp, Log, TEXT("UEBlueprintMCP: Set property '%s' on component '%s' in Blueprint '%s'"),
 		*PropertyName, *ComponentName, *Blueprint->GetName());

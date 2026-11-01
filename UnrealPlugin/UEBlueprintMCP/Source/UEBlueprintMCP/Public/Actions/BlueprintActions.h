@@ -156,11 +156,12 @@ private:
 /**
  * FSetComponentPropertyAction
  *
- * Sets a property on a component in a Blueprint.
+ * Sets a property on a component in a Blueprint, or on a widget in a Widget Blueprint
+ * (e.g. property_name "bIsVariable" = true to tick "Is Variable" in the Designer).
  *
  * Parameters:
  *   - blueprint_name (required): Name of the Blueprint
- *   - component_name (required): Name of the component
+ *   - component_name (required): Name of the component (or widget)
  *   - property_name (required): Property to set
  *   - property_value (required): Value to set
  *

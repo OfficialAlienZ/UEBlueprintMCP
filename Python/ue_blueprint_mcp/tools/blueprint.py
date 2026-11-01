@@ -259,7 +259,7 @@ def get_tools() -> list[Tool]:
         ),
         Tool(
             name="set_component_property",
-            description="Set a property on a component in a Blueprint.",
+            description="Set a property on a component in a Blueprint, or on a widget in a Widget Blueprint (component_name = widget name). For widgets, property_name 'bIsVariable' with value 'true' ticks 'Is Variable' in the Designer so graphs can reference the widget.",
             inputSchema={
                 "type": "object",
                 "properties": {

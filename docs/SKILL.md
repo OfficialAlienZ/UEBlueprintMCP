@@ -54,7 +54,7 @@ This skill provides specialized knowledge for working with Unreal Engine Bluepri
 
 ### Components
 - `add_component_to_blueprint` - Add StaticMeshComponent, BoxComponent, SphereComponent, SceneComponent, CameraComponent
-- `set_component_property` - Set properties on components
+- `set_component_property` - Set properties on components. On Widget Blueprints `component_name` is a widget in the tree; `property_name=bIsVariable`, `property_value=true` ticks "Is Variable" (needed before a graph can reference the widget).
 - `set_static_mesh_properties` - Set mesh, material, and overlay_material on StaticMeshComponent
 - `set_physics_properties` - Configure physics simulation
 
