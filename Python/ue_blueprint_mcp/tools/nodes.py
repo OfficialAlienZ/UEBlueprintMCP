@@ -292,6 +292,7 @@ def get_tools() -> list[Tool]:
                 "properties": {
                     "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
                     "component_name": {"type": "string", "description": "Name of the component"},
+                    "graph_name": {"type": "string", "description": "Optional function graph name (defaults to event graph)"},
                     "node_position": {"type": "string", "description": "[X, Y] position. Omit to auto-place (nodes added without it are laid out left to right and re-flowed when wired)"}
                 },
                 "required": ["blueprint_name", "component_name"]
@@ -304,6 +305,7 @@ def get_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
+                    "graph_name": {"type": "string", "description": "Optional function graph name (defaults to event graph)"},
                     "node_position": {"type": "string", "description": "[X, Y] position. Omit to auto-place (nodes added without it are laid out left to right and re-flowed when wired)"}
                 },
                 "required": ["blueprint_name"]
@@ -318,6 +320,7 @@ def get_tools() -> list[Tool]:
                     "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
                     "target_class": {"type": "string", "description": "Class to cast to"},
                     "pure_cast": {"type": "boolean", "description": "Create as pure cast (no exec pins)"},
+                    "graph_name": {"type": "string", "description": "Optional function graph name (defaults to event graph)"},
                     "node_position": {"type": "array", "items": {"type": "number"}, "description": "[X, Y] position. Omit to auto-place (nodes added without it are laid out left to right and re-flowed when wired)"}
                 },
                 "required": ["blueprint_name", "target_class"]
@@ -334,6 +337,7 @@ def get_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
+                    "graph_name": {"type": "string", "description": "Optional function graph name (defaults to event graph)"},
                     "node_position": {"type": "string", "description": "[X, Y] position. Omit to auto-place (nodes added without it are laid out left to right and re-flowed when wired)"}
                 },
                 "required": ["blueprint_name"]

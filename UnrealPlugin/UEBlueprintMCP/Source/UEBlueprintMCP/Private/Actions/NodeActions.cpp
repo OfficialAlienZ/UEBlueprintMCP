@@ -1158,9 +1158,9 @@ TSharedPtr<FJsonObject> FAddBlueprintSelfReferenceAction::ExecuteInternal(const 
 	FVector2D Position = GetNodePosition(Params);
 
 	UBlueprint* Blueprint = GetTargetBlueprint(Params, Context);
-	UEdGraph* EventGraph = FMCPCommonUtils::FindOrCreateEventGraph(Blueprint);
+	UEdGraph* TargetGraph = GetTargetGraph(Params, Context);
 
-	UK2Node_Self* SelfNode = FMCPCommonUtils::CreateSelfReferenceNode(EventGraph, Position);
+	UK2Node_Self* SelfNode = FMCPCommonUtils::CreateSelfReferenceNode(TargetGraph, Position);
 	if (!SelfNode)
 	{
 		return CreateErrorResponse(TEXT("Failed to create self node"));
@@ -1188,10 +1188,10 @@ TSharedPtr<FJsonObject> FAddBlueprintGetSelfComponentReferenceAction::ExecuteInt
 	FVector2D Position = GetNodePosition(Params);
 
 	UBlueprint* Blueprint = GetTargetBlueprint(Params, Context);
-	UEdGraph* EventGraph = FMCPCommonUtils::FindOrCreateEventGraph(Blueprint);
+	UEdGraph* TargetGraph = GetTargetGraph(Params, Context);
 
 	UK2Node_VariableGet* GetComponentNode = FEdGraphSchemaAction_K2NewNode::SpawnNode<UK2Node_VariableGet>(
-		EventGraph, Position, EK2NewNodeFlags::None,
+		TargetGraph, Position, EK2NewNodeFlags::None,
 		[&ComponentName](UK2Node_VariableGet* Node) { Node->VariableReference.SetSelfMember(FName(*ComponentName)); }
 	);
 	GetComponentNode->ReconstructNode();
@@ -1244,7 +1244,7 @@ TSharedPtr<FJsonObject> FAddBlueprintCastNodeAction::ExecuteInternal(const TShar
 	FVector2D Position = GetNodePosition(Params);
 
 	UBlueprint* Blueprint = GetTargetBlueprint(Params, Context);
-	UEdGraph* EventGraph = FMCPCommonUtils::FindOrCreateEventGraph(Blueprint);
+	UEdGraph* TargetGraph = GetTargetGraph(Params, Context);
 
 	// Find the target class
 	UClass* TargetClass = nullptr;
@@ -1295,7 +1295,7 @@ TSharedPtr<FJsonObject> FAddBlueprintCastNodeAction::ExecuteInternal(const TShar
 	}
 
 	UK2Node_DynamicCast* CastNode = FEdGraphSchemaAction_K2NewNode::SpawnNode<UK2Node_DynamicCast>(
-		EventGraph, Position, EK2NewNodeFlags::None,
+		TargetGraph, Position, EK2NewNodeFlags::None,
 		[TargetClass, bPureCast](UK2Node_DynamicCast* Node) {
 			Node->TargetType = TargetClass;
 			Node->SetPurity(bPureCast);
