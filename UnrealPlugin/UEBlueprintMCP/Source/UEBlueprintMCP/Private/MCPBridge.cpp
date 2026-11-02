@@ -179,6 +179,7 @@ void UMCPBridge::RegisterActions()
 	// Node Actions - Blueprint Function Graph
 	// =========================================================================
 	ActionHandlers.Add(TEXT("create_blueprint_function"), MakeShared<FCreateBlueprintFunctionAction>());
+	ActionHandlers.Add(TEXT("delete_blueprint_function"), MakeShared<FDeleteBlueprintFunctionAction>());
 
 	// =========================================================================
 	// Node Actions - Event Dispatchers

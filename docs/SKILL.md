@@ -61,7 +61,7 @@ This skill provides specialized knowledge for working with Unreal Engine Bluepri
 ### Variables
 - `add_blueprint_variable` - Add variable (Boolean, Integer, Float, Vector, String). Optional `is_exposed`, `replicated`, `replication_condition` (e.g. OwnerOnly); if the variable already exists, its flags are updated instead
 - `add_blueprint_variable_get` - Create getter node for variable. Optional `owner_class` (Blueprint name/path, class path or native class) reads a variable of another object: the node gets a Target (`self`) pin to wire to the object reference (e.g. `owner_class: BP_Objective`, `variable_name: Missing Items`)
-- `add_blueprint_variable_set` - Create setter node for variable
+- `add_blueprint_variable_set` - Create setter node for variable. Optional `owner_class` (alias `target`, same formats as the getter) sets a variable of another object: the node gets a Target (`self`) pin (e.g. `owner_class: CharacterMovementComponent`, `variable_name: bOrientRotationToMovement`)
 
 ### Event Nodes
 - `add_blueprint_event_node` - Standard events (ReceiveBeginPlay, ReceiveTick)
@@ -80,7 +80,8 @@ This skill provides specialized knowledge for working with Unreal Engine Bluepri
 - `call_blueprint_function` - Call custom Blueprint function (target_blueprint must be compiled)
 
 ### Blueprint Function Graphs
-- `create_blueprint_function` - Create function graph with inputs/outputs, returns entry_node_id and result_node_id
+- `create_blueprint_function` - Create function graph with inputs/outputs, returns entry_node_id and result_node_id. Param types: Float, Boolean, Integer, String, Name, Text, Vector, Rotator, Transform, `Object`/`Class` + `class` key, or a class/Blueprint name as the type (object reference, e.g. `Actor`). Unknown types are rejected
+- `delete_blueprint_function` - Delete a function graph by `function_name` (recompiles; call nodes elsewhere become compile errors)
 - All node commands support `graph_name` parameter to add nodes to function graphs instead of event graph
 
 ### Pin & Connection Management

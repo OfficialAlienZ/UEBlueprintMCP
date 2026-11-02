@@ -262,6 +262,17 @@ protected:
 };
 
 
+/** Delete a function graph from a Blueprint */
+class UEBLUEPRINTMCP_API FDeleteBlueprintFunctionAction : public FBlueprintAction
+{
+public:
+	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
+protected:
+	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
+	virtual FString GetActionName() const override { return TEXT("delete_blueprint_function"); }
+};
+
+
 // ============================================================================
 // Event Dispatchers
 // ============================================================================

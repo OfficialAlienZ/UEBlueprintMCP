@@ -856,27 +856,31 @@ namespace
 		}
 		return nullptr;
 	}
-}
 
-TSharedPtr<FJsonObject> FAddBlueprintVariableGetAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
-{
-	FString VariableName = Params->GetStringField(TEXT("variable_name"));
-	const FString OwnerClassName = GetOptionalString(Params, TEXT("owner_class"));
-	FVector2D Position = GetNodePosition(Params);
-
-	UBlueprint* Blueprint = GetTargetBlueprint(Params, Context);
-	UEdGraph* TargetGraph = GetTargetGraph(Params, Context);
-
-	// Optional: read a variable that lives on another object (node gets a Target pin)
-	UClass* OwnerClass = nullptr;
-	if (!OwnerClassName.IsEmpty())
+	/**
+	 * Resolve the optional `owner_class` (alias `target`) param of the variable get/set actions and
+	 * check the variable exists on it. OutClass stays null when no owner was given (self variable).
+	 * Returns false and fills OutError when the class or variable cannot be found.
+	 */
+	bool ResolveVariableOwner(const TSharedPtr<FJsonObject>& Params, const FString& VariableName, UClass*& OutClass, FString& OutError)
 	{
-		OwnerClass = ResolveOwnerClass(OwnerClassName);
+		OutClass = nullptr;
+		FString OwnerClassName;
+		if (!Params->TryGetStringField(TEXT("owner_class"), OwnerClassName) || OwnerClassName.IsEmpty())
+		{
+			Params->TryGetStringField(TEXT("target"), OwnerClassName);
+		}
+		if (OwnerClassName.IsEmpty())
+		{
+			return true;
+		}
+
+		UClass* OwnerClass = ResolveOwnerClass(OwnerClassName);
 		if (!OwnerClass)
 		{
-			return CreateErrorResponse(FString::Printf(
-				TEXT("owner_class '%s' not found. Use a Blueprint name (BP_Objective), a class path or a native class name."), *OwnerClassName),
-				TEXT("not_found"));
+			OutError = FString::Printf(
+				TEXT("owner_class '%s' not found. Use a Blueprint name (BP_Objective), a class path or a native class name."), *OwnerClassName);
+			return false;
 		}
 
 		FProperty* Property = OwnerClass->FindPropertyByName(FName(*VariableName));
@@ -893,10 +897,31 @@ TSharedPtr<FJsonObject> FAddBlueprintVariableGetAction::ExecuteInternal(const TS
 		}
 		if (!Property)
 		{
-			return CreateErrorResponse(FString::Printf(
+			OutError = FString::Printf(
 				TEXT("Variable '%s' not found on class '%s'. Compile the owner Blueprint if the variable was just added."),
-				*VariableName, *OwnerClass->GetName()), TEXT("not_found"));
+				*VariableName, *OwnerClass->GetName());
+			return false;
 		}
+
+		OutClass = OwnerClass;
+		return true;
+	}
+}
+
+TSharedPtr<FJsonObject> FAddBlueprintVariableGetAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	FString VariableName = Params->GetStringField(TEXT("variable_name"));
+	FVector2D Position = GetNodePosition(Params);
+
+	UBlueprint* Blueprint = GetTargetBlueprint(Params, Context);
+	UEdGraph* TargetGraph = GetTargetGraph(Params, Context);
+
+	// Optional: read a variable that lives on another object (node gets a Target pin)
+	UClass* OwnerClass = nullptr;
+	FString OwnerError;
+	if (!ResolveVariableOwner(Params, VariableName, OwnerClass, OwnerError))
+	{
+		return CreateErrorResponse(OwnerError, TEXT("not_found"));
 	}
 
 	UK2Node_VariableGet* VarGetNode = FEdGraphSchemaAction_K2NewNode::SpawnNode<UK2Node_VariableGet>(
@@ -944,9 +969,27 @@ TSharedPtr<FJsonObject> FAddBlueprintVariableSetAction::ExecuteInternal(const TS
 	UBlueprint* Blueprint = GetTargetBlueprint(Params, Context);
 	UEdGraph* TargetGraph = GetTargetGraph(Params, Context);
 
+	// Optional: write a variable that lives on another object (node gets a Target pin)
+	UClass* OwnerClass = nullptr;
+	FString OwnerError;
+	if (!ResolveVariableOwner(Params, VariableName, OwnerClass, OwnerError))
+	{
+		return CreateErrorResponse(OwnerError, TEXT("not_found"));
+	}
+
 	UK2Node_VariableSet* VarSetNode = FEdGraphSchemaAction_K2NewNode::SpawnNode<UK2Node_VariableSet>(
 		TargetGraph, Position, EK2NewNodeFlags::None,
-		[&VariableName](UK2Node_VariableSet* Node) { Node->VariableReference.SetSelfMember(FName(*VariableName)); }
+		[&VariableName, OwnerClass](UK2Node_VariableSet* Node)
+		{
+			if (OwnerClass)
+			{
+				Node->VariableReference.SetExternalMember(FName(*VariableName), OwnerClass);
+			}
+			else
+			{
+				Node->VariableReference.SetSelfMember(FName(*VariableName));
+			}
+		}
 	);
 	VarSetNode->ReconstructNode();
 
@@ -955,6 +998,11 @@ TSharedPtr<FJsonObject> FAddBlueprintVariableSetAction::ExecuteInternal(const TS
 
 	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
 	ResultData->SetStringField(TEXT("node_id"), VarSetNode->NodeGuid.ToString());
+	if (OwnerClass)
+	{
+		ResultData->SetStringField(TEXT("owner_class"), OwnerClass->GetName());
+		ResultData->SetStringField(TEXT("target_pin"), UEdGraphSchema_K2::PN_Self.ToString());
+	}
 	return CreateSuccessResponse(ResultData);
 }
 
@@ -1396,10 +1444,118 @@ TSharedPtr<FJsonObject> FAddBlueprintGetSubsystemNodeAction::ExecuteInternal(con
 // Blueprint Function Graph
 // ============================================================================
 
+namespace
+{
+	struct FFunctionParamSpec
+	{
+		FName Name;
+		FEdGraphPinType Type;
+	};
+
+	/**
+	 * Map a parameter type string to a pin type. Primitive names (Float, Boolean, Integer, String, Name, Text,
+	 * Vector, Rotator, Transform), `Object` / `Class` (with ClassName, default Object) or any class name /
+	 * Blueprint name / class path (object reference of that class).
+	 */
+	bool ParseFunctionPinType(const FString& TypeName, const FString& ClassName, FEdGraphPinType& OutType, FString& OutError)
+	{
+		auto Is = [&TypeName](const TCHAR* Value) { return TypeName.Equals(Value, ESearchCase::IgnoreCase); };
+
+		if (Is(TEXT("Float")) || Is(TEXT("Double")) || Is(TEXT("Real"))) { MCPCompat::SetRealPinType(OutType); return true; }
+		if (Is(TEXT("Boolean")) || Is(TEXT("Bool"))) { OutType.PinCategory = UEdGraphSchema_K2::PC_Boolean; return true; }
+		if (Is(TEXT("Integer")) || Is(TEXT("Int"))) { OutType.PinCategory = UEdGraphSchema_K2::PC_Int; return true; }
+		if (Is(TEXT("String"))) { OutType.PinCategory = UEdGraphSchema_K2::PC_String; return true; }
+		if (Is(TEXT("Name"))) { OutType.PinCategory = UEdGraphSchema_K2::PC_Name; return true; }
+		if (Is(TEXT("Text"))) { OutType.PinCategory = UEdGraphSchema_K2::PC_Text; return true; }
+		if (Is(TEXT("Vector")))
+		{
+			OutType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+			OutType.PinSubCategoryObject = TBaseStructure<FVector>::Get();
+			return true;
+		}
+		if (Is(TEXT("Rotator")))
+		{
+			OutType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+			OutType.PinSubCategoryObject = TBaseStructure<FRotator>::Get();
+			return true;
+		}
+		if (Is(TEXT("Transform")))
+		{
+			OutType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+			OutType.PinSubCategoryObject = TBaseStructure<FTransform>::Get();
+			return true;
+		}
+
+		const bool bIsObjectKeyword = Is(TEXT("Object"));
+		const bool bIsClassKeyword = Is(TEXT("Class"));
+		const FString& ClassToResolve = (bIsObjectKeyword || bIsClassKeyword) ? ClassName : TypeName;
+
+		UClass* Class = nullptr;
+		if (ClassToResolve.IsEmpty())
+		{
+			Class = UObject::StaticClass();
+		}
+		else
+		{
+			Class = ResolveOwnerClass(ClassToResolve);
+			if (!Class)
+			{
+				OutError = FString::Printf(
+					TEXT("Unknown type '%s'. Use Float, Boolean, Integer, String, Name, Text, Vector, Rotator, Transform, ")
+					TEXT("Object / Class with a 'class' field, or a class / Blueprint name (e.g. Actor, Character)."),
+					*ClassToResolve);
+				return false;
+			}
+		}
+
+		OutType.PinCategory = bIsClassKeyword ? UEdGraphSchema_K2::PC_Class : UEdGraphSchema_K2::PC_Object;
+		OutType.PinSubCategoryObject = Class;
+		return true;
+	}
+
+	/** Parse an `inputs` / `outputs` array of {name, type, class?} objects. */
+	bool ParseFunctionParams(const TArray<TSharedPtr<FJsonValue>>* Array, const TCHAR* Kind, TArray<FFunctionParamSpec>& Out, FString& OutError)
+	{
+		if (!Array) return true;
+
+		for (const TSharedPtr<FJsonValue>& Value : *Array)
+		{
+			const TSharedPtr<FJsonObject> Obj = Value.IsValid() ? Value->AsObject() : nullptr;
+			FString ParamName, ParamType, ClassName;
+			if (!Obj || !Obj->TryGetStringField(TEXT("name"), ParamName) || !Obj->TryGetStringField(TEXT("type"), ParamType))
+			{
+				OutError = FString::Printf(TEXT("Each %s must be an object with 'name' and 'type' fields"), Kind);
+				return false;
+			}
+			if (!Obj->TryGetStringField(TEXT("class"), ClassName))
+			{
+				Obj->TryGetStringField(TEXT("class_name"), ClassName);
+			}
+
+			FFunctionParamSpec Spec;
+			Spec.Name = FName(*ParamName);
+			FString TypeError;
+			if (!ParseFunctionPinType(ParamType, ClassName, Spec.Type, TypeError))
+			{
+				OutError = FString::Printf(TEXT("%s '%s': %s"), Kind, *ParamName, *TypeError);
+				return false;
+			}
+			Out.Add(Spec);
+		}
+		return true;
+	}
+}
+
 bool FCreateBlueprintFunctionAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
 {
 	FString FunctionName;
 	if (!GetRequiredString(Params, TEXT("function_name"), FunctionName, OutError)) return false;
+
+	// Reject unknown parameter types up front (nothing is created yet)
+	TArray<FFunctionParamSpec> Unused;
+	if (!ParseFunctionParams(GetOptionalArray(Params, TEXT("inputs")), TEXT("input"), Unused, OutError)) return false;
+	if (!ParseFunctionParams(GetOptionalArray(Params, TEXT("outputs")), TEXT("output"), Unused, OutError)) return false;
+
 	return ValidateBlueprint(Params, Context, OutError);
 }
 
@@ -1460,55 +1616,23 @@ TSharedPtr<FJsonObject> FCreateBlueprintFunctionAction::ExecuteInternal(const TS
 		if (!ResultNode) ResultNode = Cast<UK2Node_FunctionResult>(Node);
 	}
 
-	// Add input parameters
-	const TArray<TSharedPtr<FJsonValue>>* InputsArray = GetOptionalArray(Params, TEXT("inputs"));
-	if (InputsArray && EntryNode)
+	// Add input parameters (types were checked in Validate)
+	FString ParamError;
+	TArray<FFunctionParamSpec> InputSpecs;
+	ParseFunctionParams(GetOptionalArray(Params, TEXT("inputs")), TEXT("input"), InputSpecs, ParamError);
+	if (InputSpecs.Num() > 0 && EntryNode)
 	{
-		for (const TSharedPtr<FJsonValue>& InputValue : *InputsArray)
+		for (const FFunctionParamSpec& Spec : InputSpecs)
 		{
-			const TSharedPtr<FJsonObject>& InputObj = InputValue->AsObject();
-			if (!InputObj) continue;
-
-			FString ParamName, ParamType;
-			if (!InputObj->TryGetStringField(TEXT("name"), ParamName)) continue;
-			if (!InputObj->TryGetStringField(TEXT("type"), ParamType)) continue;
-
-			FEdGraphPinType PinType;
-			if (ParamType.Equals(TEXT("Float"), ESearchCase::IgnoreCase) ||
-				ParamType.Equals(TEXT("Double"), ESearchCase::IgnoreCase))
-			{
-				MCPCompat::SetRealPinType(PinType);
-			}
-			else if (ParamType.Equals(TEXT("Boolean"), ESearchCase::IgnoreCase))
-			{
-				PinType.PinCategory = UEdGraphSchema_K2::PC_Boolean;
-			}
-			else if (ParamType.Equals(TEXT("Integer"), ESearchCase::IgnoreCase))
-			{
-				PinType.PinCategory = UEdGraphSchema_K2::PC_Int;
-			}
-			else if (ParamType.Equals(TEXT("Vector"), ESearchCase::IgnoreCase))
-			{
-				PinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
-				PinType.PinSubCategoryObject = TBaseStructure<FVector>::Get();
-			}
-			else if (ParamType.Equals(TEXT("String"), ESearchCase::IgnoreCase))
-			{
-				PinType.PinCategory = UEdGraphSchema_K2::PC_String;
-			}
-			else
-			{
-				MCPCompat::SetRealPinType(PinType);
-			}
-
-			EntryNode->CreateUserDefinedPin(FName(*ParamName), PinType, EGPD_Output);
+			EntryNode->CreateUserDefinedPin(Spec.Name, Spec.Type, EGPD_Output);
 		}
 		EntryNode->ReconstructNode();
 	}
 
 	// Add output parameters
-	const TArray<TSharedPtr<FJsonValue>>* OutputsArray = GetOptionalArray(Params, TEXT("outputs"));
-	if (OutputsArray)
+	TArray<FFunctionParamSpec> OutputSpecs;
+	ParseFunctionParams(GetOptionalArray(Params, TEXT("outputs")), TEXT("output"), OutputSpecs, ParamError);
+	if (OutputSpecs.Num() > 0)
 	{
 		if (!ResultNode)
 		{
@@ -1517,44 +1641,9 @@ TSharedPtr<FJsonObject> FCreateBlueprintFunctionAction::ExecuteInternal(const TS
 			);
 		}
 
-		for (const TSharedPtr<FJsonValue>& OutputValue : *OutputsArray)
+		for (const FFunctionParamSpec& Spec : OutputSpecs)
 		{
-			const TSharedPtr<FJsonObject>& OutputObj = OutputValue->AsObject();
-			if (!OutputObj) continue;
-
-			FString ParamName, ParamType;
-			if (!OutputObj->TryGetStringField(TEXT("name"), ParamName)) continue;
-			if (!OutputObj->TryGetStringField(TEXT("type"), ParamType)) continue;
-
-			FEdGraphPinType PinType;
-			if (ParamType.Equals(TEXT("Float"), ESearchCase::IgnoreCase) ||
-				ParamType.Equals(TEXT("Double"), ESearchCase::IgnoreCase))
-			{
-				MCPCompat::SetRealPinType(PinType);
-			}
-			else if (ParamType.Equals(TEXT("Boolean"), ESearchCase::IgnoreCase))
-			{
-				PinType.PinCategory = UEdGraphSchema_K2::PC_Boolean;
-			}
-			else if (ParamType.Equals(TEXT("Integer"), ESearchCase::IgnoreCase))
-			{
-				PinType.PinCategory = UEdGraphSchema_K2::PC_Int;
-			}
-			else if (ParamType.Equals(TEXT("Vector"), ESearchCase::IgnoreCase))
-			{
-				PinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
-				PinType.PinSubCategoryObject = TBaseStructure<FVector>::Get();
-			}
-			else if (ParamType.Equals(TEXT("String"), ESearchCase::IgnoreCase))
-			{
-				PinType.PinCategory = UEdGraphSchema_K2::PC_String;
-			}
-			else
-			{
-				MCPCompat::SetRealPinType(PinType);
-			}
-
-			ResultNode->CreateUserDefinedPin(FName(*ParamName), PinType, EGPD_Input);
+			ResultNode->CreateUserDefinedPin(Spec.Name, Spec.Type, EGPD_Input);
 		}
 		ResultNode->ReconstructNode();
 	}
@@ -1571,6 +1660,51 @@ TSharedPtr<FJsonObject> FCreateBlueprintFunctionAction::ExecuteInternal(const TS
 	ResultData->SetStringField(TEXT("graph_name"), NewGraph->GetName());
 	if (EntryNode) ResultData->SetStringField(TEXT("entry_node_id"), EntryNode->NodeGuid.ToString());
 	if (ResultNode) ResultData->SetStringField(TEXT("result_node_id"), ResultNode->NodeGuid.ToString());
+	return CreateSuccessResponse(ResultData);
+}
+
+
+bool FDeleteBlueprintFunctionAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	FString FunctionName;
+	if (!GetRequiredString(Params, TEXT("function_name"), FunctionName, OutError)) return false;
+	return ValidateBlueprint(Params, Context, OutError);
+}
+
+TSharedPtr<FJsonObject> FDeleteBlueprintFunctionAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	const FString FunctionName = Params->GetStringField(TEXT("function_name"));
+	UBlueprint* Blueprint = GetTargetBlueprint(Params, Context);
+
+	UEdGraph* FunctionGraph = nullptr;
+	for (UEdGraph* Graph : Blueprint->FunctionGraphs)
+	{
+		if (Graph && Graph->GetFName() == FName(*FunctionName))
+		{
+			FunctionGraph = Graph;
+			break;
+		}
+	}
+
+	if (!FunctionGraph)
+	{
+		TArray<FString> Existing;
+		for (UEdGraph* Graph : Blueprint->FunctionGraphs)
+		{
+			if (Graph) Existing.Add(Graph->GetName());
+		}
+		return CreateErrorResponse(FString::Printf(
+			TEXT("Function '%s' not found in Blueprint '%s'. Existing functions: %s"),
+			*FunctionName, *Blueprint->GetName(), *FString::Join(Existing, TEXT(", "))), TEXT("not_found"));
+	}
+
+	// Removes the graph and recompiles; call nodes referencing it elsewhere turn into compile errors
+	FBlueprintEditorUtils::RemoveGraph(Blueprint, FunctionGraph, EGraphRemoveFlags::Recompile);
+	MarkBlueprintModified(Blueprint, Context);
+
+	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
+	ResultData->SetStringField(TEXT("function_name"), FunctionName);
+	ResultData->SetBoolField(TEXT("deleted"), true);
 	return CreateSuccessResponse(ResultData);
 }
 

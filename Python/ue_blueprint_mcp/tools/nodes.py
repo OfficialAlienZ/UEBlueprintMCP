@@ -160,7 +160,12 @@ def get_tools() -> list[Tool]:
         ),
         Tool(
             name="create_blueprint_function",
-            description="Create a new function graph in a Blueprint with inputs/outputs.",
+            description=(
+                "Create a new function graph in a Blueprint with inputs/outputs. Parameter types: Float, Boolean, "
+                "Integer, String, Name, Text, Vector, Rotator, Transform, Object / Class (with a 'class' key), or a "
+                "class / Blueprint name directly as the type (e.g. 'Actor', 'Character' = object reference). "
+                "Unknown types are rejected."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -169,14 +174,26 @@ def get_tools() -> list[Tool]:
                     "inputs": {
                         "type": "array",
                         "items": {"type": "object"},
-                        "description": "Input parameters with 'name' and 'type' keys"
+                        "description": "Input parameters: {'name', 'type', optional 'class'}, e.g. {'name': 'Target', 'type': 'Object', 'class': 'Actor'} or {'name': 'Target', 'type': 'Character'}"
                     },
                     "outputs": {
                         "type": "array",
                         "items": {"type": "object"},
-                        "description": "Output parameters with 'name' and 'type' keys"
+                        "description": "Output parameters, same format as inputs"
                     },
                     "is_pure": {"type": "boolean", "description": "Create as pure function (no exec pins)"}
+                },
+                "required": ["blueprint_name", "function_name"]
+            }
+        ),
+        Tool(
+            name="delete_blueprint_function",
+            description="Delete a function graph from a Blueprint (recompiles; call nodes of it elsewhere become compile errors).",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
+                    "function_name": {"type": "string", "description": "Name of the function graph to delete"}
                 },
                 "required": ["blueprint_name", "function_name"]
             }
@@ -238,12 +255,18 @@ def get_tools() -> list[Tool]:
         ),
         Tool(
             name="add_blueprint_variable_set",
-            description="Add a Variable Set node to a Blueprint graph.",
+            description=(
+                "Add a Variable Set node to a Blueprint graph. By default it sets a variable of the Blueprint "
+                "being edited. With owner_class (alias target) it sets a variable of ANOTHER object instead: the "
+                "node gets a Target ('self') input pin, connect it to the object reference (e.g. owner_class "
+                "CharacterMovementComponent, variable_name bOrientRotationToMovement)."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
                     "variable_name": {"type": "string", "description": "Name of the variable"},
+                    "owner_class": {"type": "string", "description": "Optional (alias: target). Class that owns the variable when it belongs to another object: Blueprint name/path, class path or native class name. Omit for the Blueprint's own variables."},
                     "node_position": {"type": "string", "description": "[X, Y] position. Omit to auto-place (nodes added without it are laid out left to right and re-flowed when wired)"},
                     "graph_name": {"type": "string", "description": "Optional function graph name"}
                 },
@@ -523,6 +546,7 @@ TOOL_HANDLERS = {
     # Functions
     "add_blueprint_function_node": "add_blueprint_function_node",
     "create_blueprint_function": "create_blueprint_function",
+    "delete_blueprint_function": "delete_blueprint_function",
     "call_blueprint_function": "call_blueprint_function",
     # Variables
     "add_blueprint_variable": "add_blueprint_variable",
