@@ -16,8 +16,8 @@ class UBlueprintFactory;
  * Handles existing Blueprint cleanup and parent class resolution.
  *
  * Parameters:
- *   - name (required): Name of the Blueprint to create
- *   - parent_class (optional): Parent class name (Actor, Pawn, etc.)
+ *   - name (required): Plain name (created in /Game/Blueprints/) or full asset path (/Game/Folder/BP_Name)
+ *   - parent_class (optional): Class name (Actor, Pawn, ...), class path (/Script/Module.Class) or Blueprint (short name or /Game/Folder/BP_Name)
  *
  * Returns:
  *   - name: Created Blueprint name
@@ -32,10 +32,14 @@ protected:
 	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
 	virtual FString GetActionName() const override { return TEXT("create_blueprint"); }
 
-private:
-	/** Resolve parent class from name string */
-	UClass* ResolveParentClass(const FString& ParentClassName) const;
+public:
+	/**
+	 * Resolve a parent class from a native name, class path (/Script/Module.Class) or Blueprint
+	 * (short name or asset path). Returns nullptr if unresolved. Shared with set_blueprint_property (reparent).
+	 */
+	static UClass* ResolveParentClass(const FString& ParentClassName);
 
+private:
 	/** Clean up existing Blueprint with same name */
 	void CleanupExistingBlueprint(const FString& BlueprintName, const FString& PackagePath) const;
 };
@@ -237,16 +241,19 @@ protected:
 /**
  * FSetBlueprintPropertyAction
  *
- * Sets a property on a Blueprint's class default object.
+ * Sets a property on a Blueprint's class default object and/or reparents the Blueprint.
  *
  * Parameters:
  *   - blueprint_name (required): Name of the Blueprint
- *   - property_name (required): Property to set
- *   - property_value (required): Value to set
+ *   - property_name: Property to set (required unless parent_class is given)
+ *   - property_value: Value to set (required with property_name)
+ *   - parent_class (optional): New parent class (native name, /Script/... path, or Blueprint name/path).
+ *     Reparents, refreshes nodes and compiles.
  *
  * Returns:
  *   - property: Property name
- *   - success: Whether property was set
+ *   - old_parent_class / parent_class / compiled_without_errors (when reparenting)
+ *   - success: Whether the operation succeeded
  */
 class UEBLUEPRINTMCP_API FSetBlueprintPropertyAction : public FBlueprintAction
 {

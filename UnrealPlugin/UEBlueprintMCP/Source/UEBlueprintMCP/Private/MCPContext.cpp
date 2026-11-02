@@ -20,6 +20,8 @@ namespace
 	constexpr double SaveMaxDelaySeconds = 15.0;
 }
 
+int32 FMCPBusyScope::Depth = 0;
+
 FMCPEditorContext::FMCPEditorContext()
 	: CurrentGraphName(NAME_None)
 {
@@ -115,6 +117,9 @@ void FMCPEditorContext::SaveDirtyPackages()
 		SaveTickerHandle.Reset();
 	}
 
+	// Block re-entrant MCP commands / saves while UPackage::Save pumps the task graph
+	FMCPBusyScope BusyScope;
+
 	// Save the whole project
 	bool bSaved = FEditorFileUtils::SaveDirtyPackages(false, true, true, false, false, false);
 
@@ -161,8 +166,8 @@ void FMCPEditorContext::RequestSave()
 
 	SaveTickerHandle = MCPCompat::AddCoreTicker([this](float) -> bool
 	{
-		// Wait while GC runs or PIE is active; saving then is unsafe
-		if (IsGarbageCollecting() || FMCPPIE::IsActiveOrPending())
+		// Wait while GC runs, PIE is active, or another command/save is executing; saving then is unsafe
+		if (IsGarbageCollecting() || FMCPPIE::IsActiveOrPending() || FMCPBusyScope::IsBusy())
 		{
 			return true;
 		}

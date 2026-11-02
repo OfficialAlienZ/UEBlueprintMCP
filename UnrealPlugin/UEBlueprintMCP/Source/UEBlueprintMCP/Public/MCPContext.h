@@ -9,6 +9,28 @@
 #include "Materials/MaterialExpression.h"
 
 /**
+ * FMCPBusyScope
+ *
+ * Game-thread re-entrancy guard. Saving a package, compiling a Blueprint or loading an asset can
+ * pump the task graph / Slate (progress dialogs), which would run the next queued MCP command or
+ * deferred save INSIDE the running one (crash in UPackage::Save / UObjectGlobals). While a scope
+ * is alive, FMCPServer defers incoming commands and the save ticker waits.
+ */
+struct UEBLUEPRINTMCP_API FMCPBusyScope
+{
+	FMCPBusyScope() { ++Depth; }
+	~FMCPBusyScope() { --Depth; }
+	FMCPBusyScope(const FMCPBusyScope&) = delete;
+	FMCPBusyScope& operator=(const FMCPBusyScope&) = delete;
+
+	/** True while a command or save is executing on the game thread (game thread only) */
+	static bool IsBusy() { return Depth > 0; }
+
+private:
+	static int32 Depth;
+};
+
+/**
  * FMCPEditorContext
  *
  * Tracks the current editing context across MCP commands.

@@ -45,6 +45,45 @@ protected:
 };
 
 /**
+ * Add an Image to a Widget Blueprint (optionally inside a given panel)
+ */
+class UEBLUEPRINTMCP_API FAddImageToWidgetAction : public FEditorAction
+{
+public:
+	virtual FString GetActionName() const override { return TEXT("AddImageToWidget"); }
+
+protected:
+	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
+	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
+};
+
+/**
+ * Duplicate a leaf widget inside a Widget Blueprint (copies properties and slot settings)
+ */
+class UEBLUEPRINTMCP_API FDuplicateWidgetAction : public FEditorAction
+{
+public:
+	virtual FString GetActionName() const override { return TEXT("DuplicateWidget"); }
+
+protected:
+	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
+	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
+};
+
+/**
+ * Remove a widget (and its children) from a Widget Blueprint
+ */
+class UEBLUEPRINTMCP_API FRemoveWidgetAction : public FEditorAction
+{
+public:
+	virtual FString GetActionName() const override { return TEXT("RemoveWidget"); }
+
+protected:
+	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
+	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
+};
+
+/**
  * Bind a widget event to a function
  */
 class UEBLUEPRINTMCP_API FBindWidgetEventAction : public FEditorAction

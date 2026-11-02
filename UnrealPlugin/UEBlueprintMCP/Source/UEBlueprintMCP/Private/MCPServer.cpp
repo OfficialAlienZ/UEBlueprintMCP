@@ -2,6 +2,8 @@
 
 #include "MCPServer.h"
 #include "MCPBridge.h"
+#include "MCPContext.h"
+#include "MCPCompat.h"
 #include "Async/Async.h"
 #include "Async/Future.h"
 #include "Misc/ScopeLock.h"
@@ -416,6 +418,53 @@ namespace
 		};
 		return LongRunning.Contains(CommandType) ? 120.0 : 25.0;
 	}
+
+	/**
+	 * Run the command on the game thread, but never inside another running command or save.
+	 * If the game thread is busy (nested task-graph pump during a save/compile) the call is retried
+	 * from a core ticker, which is not pumped by nested loops.
+	 */
+	void RunWhenIdle(TSharedRef<FGameThreadCall, ESPMode::ThreadSafe> Call, TWeakObjectPtr<UMCPBridge> WeakBridge, TFunction<FString(UMCPBridge*)> Work)
+	{
+		{
+			FScopeLock Lock(&Call->Lock);
+			if (Call->State == 2)
+			{
+				return;  // Caller already timed out; do not run a stale command.
+			}
+		}
+
+		if (FMCPBusyScope::IsBusy())
+		{
+			MCPCompat::AddCoreTicker([Call, WeakBridge, Work](float) -> bool
+			{
+				RunWhenIdle(Call, WeakBridge, Work);
+				return false;
+			}, 0.1f);
+			return;
+		}
+
+		{
+			FScopeLock Lock(&Call->Lock);
+			if (Call->State == 2)
+			{
+				return;
+			}
+			Call->State = 1;
+		}
+
+		FString Result;
+		if (UMCPBridge* LiveBridge = WeakBridge.Get())
+		{
+			FMCPBusyScope BusyScope;
+			Result = Work(LiveBridge);
+		}
+		else
+		{
+			Result = TEXT("{\"status\":\"error\",\"error\":\"Bridge not available\"}");
+		}
+		Call->Promise.SetValue(Result);
+	}
 }
 
 FString FMCPServer::RunOnGameThread(const FString& Label, double TimeoutSeconds, TFunction<FString(UMCPBridge*)> Work)
@@ -428,25 +477,7 @@ FString FMCPServer::RunOnGameThread(const FString& Label, double TimeoutSeconds,
 	// even if this function has already returned because of a timeout.
 	AsyncTask(ENamedThreads::GameThread, [Call, WeakBridge, Work]()
 	{
-		{
-			FScopeLock Lock(&Call->Lock);
-			if (Call->State == 2)
-			{
-				return;  // Caller already timed out; do not run a stale command.
-			}
-			Call->State = 1;
-		}
-
-		FString Result;
-		if (UMCPBridge* LiveBridge = WeakBridge.Get())
-		{
-			Result = Work(LiveBridge);
-		}
-		else
-		{
-			Result = TEXT("{\"status\":\"error\",\"error\":\"Bridge not available\"}");
-		}
-		Call->Promise.SetValue(Result);
+		RunWhenIdle(Call, WeakBridge, Work);
 	});
 
 	if (Future.WaitFor(FTimespan::FromSeconds(TimeoutSeconds)))

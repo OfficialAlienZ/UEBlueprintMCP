@@ -14,6 +14,10 @@
 #include "Components/CanvasPanelSlot.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "Components/Button.h"
+#include "Components/Image.h"
+#include "Components/PanelWidget.h"
+#include "Engine/Texture2D.h"
+#include "Materials/MaterialInterface.h"
 #include "K2Node_FunctionEntry.h"
 #include "K2Node_VariableGet.h"
 #include "K2Node_CustomEvent.h"
@@ -28,6 +32,10 @@ static UWidgetBlueprint* FindWidgetBlueprintByName(const FString& BlueprintName)
 		FString::Printf(TEXT("/Game/Widgets/%s"), *BlueprintName),
 		FString::Printf(TEXT("/Game/%s"), *BlueprintName)
 	};
+	if (BlueprintName.StartsWith(TEXT("/")))
+	{
+		SearchPaths.Insert(BlueprintName, 0);
+	}
 
 	for (const FString& Path : SearchPaths)
 	{
@@ -72,7 +80,40 @@ TSharedPtr<FJsonObject> FCreateUMGWidgetBlueprintAction::ExecuteInternal(const T
 			PackagePath += TEXT("/");
 		}
 	}
+Duplicate an existing Widget Blueprint instead of creating an empty one
+	FString DuplicateFrom;
+	if (Params->TryGetStringField(TEXT("duplicate_from"), DuplicateFrom) && !DuplicateFrom.IsEmpty())
+	{
+		UWidgetBlueprint* SourceBlueprint = FindWidgetBlueprintByName(DuplicateFrom);
+		if (!SourceBlueprint)
+		{
+			return FMCPCommonUtils::CreateErrorResponse(FString::Printf(
+				TEXT("Source Widget Blueprint '%s' not found in /Game/UI, /Game/Widgets, or /Game"), *DuplicateFrom));
+		}
+		if (UEditorAssetLibrary::DoesAssetExist(FullPath))
+		{
+			return FMCPCommonUtils::CreateErrorResponse(FString::Printf(
+				TEXT("Asset '%s' already exists; choose another widget_name or path"), *FullPath));
+		}
 
+		UObject* DuplicatedAsset = UEditorAssetLibrary::DuplicateAsset(SourceBlueprint->GetPathName(), FullPath);
+		UWidgetBlueprint* DuplicatedBlueprint = Cast<UWidgetBlueprint>(DuplicatedAsset);
+		if (!DuplicatedBlueprint)
+		{
+			return FMCPCommonUtils::CreateErrorResponse(FString::Printf(
+				TEXT("Failed to duplicate '%s' to '%s'"), *SourceBlueprint->GetPathName(), *FullPath));
+		}
+		UEditorAssetLibrary::SaveAsset(FullPath, false);
+
+		TSharedPtr<FJsonObject> DupResult = MakeShared<FJsonObject>();
+		DupResult->SetBoolField(TEXT("success"), true);
+		DupResult->SetStringField(TEXT("name"), BlueprintName);
+		DupResult->SetStringField(TEXT("path"), FullPath);
+		DupResult->SetStringField(TEXT("duplicated_from"), SourceBlueprint->GetPathName());
+		return DupResult;
+	}
+
+	// 
 	FString AssetName = BlueprintName;
 	FString FullPath = PackagePath + AssetName;
 
@@ -332,6 +373,347 @@ TSharedPtr<FJsonObject> FAddButtonToWidgetAction::ExecuteInternal(const TSharedP
 	TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
 	ResultObj->SetBoolField(TEXT("success"), true);
 	ResultObj->SetStringField(TEXT("widget_name"), WidgetName);
+	return ResultObj;
+}
+
+// =============================================================================
+// Shared helpers for widget-tree edits
+// =============================================================================
+
+static UPanelWidget* ResolveParentPanel(UWidgetBlueprint* WidgetBlueprint, const FString& ParentName, FString& OutError)
+{
+	UWidget* ParentWidget = ParentName.IsEmpty()
+		? WidgetBlueprint->WidgetTree->RootWidget
+		: WidgetBlueprint->WidgetTree->FindWidget(FName(*ParentName));
+	if (!ParentWidget)
+	{
+		OutError = ParentName.IsEmpty()
+			? TEXT("Widget Blueprint has no root widget")
+			: FString::Printf(TEXT("Parent widget '%s' not found in the widget tree"), *ParentName);
+		return nullptr;
+	}
+	UPanelWidget* Panel = Cast<UPanelWidget>(ParentWidget);
+	if (!Panel)
+	{
+		OutError = FString::Printf(TEXT("Parent widget '%s' is not a panel and cannot contain children"), *ParentWidget->GetName());
+		return nullptr;
+	}
+	// UE4 Designer replaces existing content of single-child containers; never do that here
+	if (!Panel->CanAddMoreChildren())
+	{
+		OutError = FString::Printf(TEXT("Parent widget '%s' cannot accept more children"), *Panel->GetName());
+		return nullptr;
+	}
+	return Panel;
+}
+
+static void ApplyCanvasSlotLayout(UPanelSlot* Slot, const TSharedPtr<FJsonObject>& Params)
+{
+	UCanvasPanelSlot* CanvasSlot = Cast<UCanvasPanelSlot>(Slot);
+	if (!CanvasSlot)
+	{
+		return;
+	}
+	const TArray<TSharedPtr<FJsonValue>>* Position;
+	if (Params->TryGetArrayField(TEXT("position"), Position) && Position->Num() >= 2)
+	{
+		CanvasSlot->SetPosition(FVector2D((*Position)[0]->AsNumber(), (*Position)[1]->AsNumber()));
+	}
+	const TArray<TSharedPtr<FJsonValue>>* Size;
+	if (Params->TryGetArrayField(TEXT("size"), Size) && Size->Num() >= 2)
+	{
+		CanvasSlot->SetSize(FVector2D((*Size)[0]->AsNumber(), (*Size)[1]->AsNumber()));
+		CanvasSlot->SetAutoSize(false);
+	}
+}
+
+static void CompileAndSaveWidgetBlueprint(UWidgetBlueprint* WidgetBlueprint)
+{
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WidgetBlueprint);
+	FKismetEditorUtilities::CompileBlueprint(WidgetBlueprint);
+	UEditorAssetLibrary::SaveAsset(WidgetBlueprint->GetPathName(), false);
+}
+
+// =============================================================================
+// FAddImageToWidgetAction
+// =============================================================================
+
+bool FAddImageToWidgetAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	if (!Params->HasField(TEXT("widget_name")))
+	{
+		OutError = TEXT("Missing 'widget_name' parameter");
+		return false;
+	}
+	if (!Params->HasField(TEXT("image_name")))
+	{
+		OutError = TEXT("Missing 'image_name' parameter");
+		return false;
+	}
+	return true;
+}
+
+TSharedPtr<FJsonObject> FAddImageToWidgetAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	FString BlueprintName = Params->GetStringField(TEXT("widget_name"));
+	FString ImageName = Params->GetStringField(TEXT("image_name"));
+
+	UWidgetBlueprint* WidgetBlueprint = FindWidgetBlueprintByName(BlueprintName);
+	if (!WidgetBlueprint)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(FString::Printf(
+			TEXT("Widget Blueprint '%s' not found in /Game/UI, /Game/Widgets, or /Game"), *BlueprintName));
+	}
+	if (WidgetBlueprint->WidgetTree->FindWidget(FName(*ImageName)))
+	{
+		return FMCPCommonUtils::CreateErrorResponse(FString::Printf(
+			TEXT("A widget named '%s' already exists in '%s'"), *ImageName, *BlueprintName));
+	}
+
+	FString Error;
+	UPanelWidget* Parent = ResolveParentPanel(WidgetBlueprint, Params->HasField(TEXT("parent_widget")) ? Params->GetStringField(TEXT("parent_widget")) : FString(), Error);
+	if (!Parent)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(Error);
+	}
+
+	UImage* Image = WidgetBlueprint->WidgetTree->ConstructWidget<UImage>(UImage::StaticClass(), *ImageName);
+	if (!Image)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(TEXT("Failed to create Image widget"));
+	}
+
+	FString BrushPath;
+	if (Params->TryGetStringField(TEXT("brush_path"), BrushPath) && !BrushPath.IsEmpty())
+	{
+		UObject* BrushAsset = UEditorAssetLibrary::LoadAsset(BrushPath);
+		if (UMaterialInterface* Material = Cast<UMaterialInterface>(BrushAsset))
+		{
+			Image->SetBrushFromMaterial(Material);
+		}
+		else if (UTexture2D* Texture = Cast<UTexture2D>(BrushAsset))
+		{
+			Image->SetBrushFromTexture(Texture, false);
+		}
+		else
+		{
+			return FMCPCommonUtils::CreateErrorResponse(FString::Printf(
+				TEXT("brush_path '%s' is not a Texture2D or Material asset"), *BrushPath));
+		}
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* Color;
+	if (Params->TryGetArrayField(TEXT("color"), Color) && Color->Num() >= 3)
+	{
+		const float A = Color->Num() >= 4 ? (*Color)[3]->AsNumber() : 1.0f;
+		Image->SetColorAndOpacity(FLinearColor((*Color)[0]->AsNumber(), (*Color)[1]->AsNumber(), (*Color)[2]->AsNumber(), A));
+	}
+
+	UPanelSlot* Slot = Parent->AddChild(Image);
+	if (!Slot)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(TEXT("Failed to add Image to parent panel"));
+	}
+	ApplyCanvasSlotLayout(Slot, Params);
+
+	CompileAndSaveWidgetBlueprint(WidgetBlueprint);
+
+	TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+	ResultObj->SetBoolField(TEXT("success"), true);
+	ResultObj->SetStringField(TEXT("widget_name"), ImageName);
+	ResultObj->SetStringField(TEXT("parent"), Parent->GetName());
+	return ResultObj;
+}
+
+// =============================================================================
+// FDuplicateWidgetAction
+// =============================================================================
+
+bool FDuplicateWidgetAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	for (const TCHAR* Field : { TEXT("widget_name"), TEXT("source_widget"), TEXT("new_name") })
+	{
+		if (!Params->HasField(Field))
+		{
+			OutError = FString::Printf(TEXT("Missing '%s' parameter"), Field);
+			return false;
+		}
+	}
+	return true;
+}
+
+TSharedPtr<FJsonObject> FDuplicateWidgetAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	FString BlueprintName = Params->GetStringField(TEXT("widget_name"));
+	FString SourceName = Params->GetStringField(TEXT("source_widget"));
+	FString NewName = Params->GetStringField(TEXT("new_name"));
+
+	UWidgetBlueprint* WidgetBlueprint = FindWidgetBlueprintByName(BlueprintName);
+	if (!WidgetBlueprint)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(FString::Printf(
+			TEXT("Widget Blueprint '%s' not found in /Game/UI, /Game/Widgets, or /Game"), *BlueprintName));
+	}
+
+	UWidgetTree* Tree = WidgetBlueprint->WidgetTree;
+	UWidget* Source = Tree->FindWidget(FName(*SourceName));
+	if (!Source)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(FString::Printf(
+			TEXT("Widget '%s' not found in '%s'"), *SourceName, *BlueprintName));
+	}
+	if (Tree->FindWidget(FName(*NewName)))
+	{
+		return FMCPCommonUtils::CreateErrorResponse(FString::Printf(
+			TEXT("A widget named '%s' already exists in '%s'"), *NewName, *BlueprintName));
+	}
+	if (const UPanelWidget* SourcePanel = Cast<UPanelWidget>(Source))
+	{
+		if (SourcePanel->GetChildrenCount() > 0)
+		{
+			return FMCPCommonUtils::CreateErrorResponse(FString::Printf(
+				TEXT("Widget '%s' has children; only leaf widgets (Image, TextBlock, ProgressBar, empty panels...) can be duplicated"), *SourceName));
+		}
+	}
+
+	FString Error;
+	UPanelWidget* Parent = nullptr;
+	if (Params->HasField(TEXT("parent_widget")))
+	{
+		Parent = ResolveParentPanel(WidgetBlueprint, Params->GetStringField(TEXT("parent_widget")), Error);
+	}
+	else if (Source->GetParent())
+	{
+		Parent = ResolveParentPanel(WidgetBlueprint, Source->GetParent()->GetName(), Error);
+	}
+	else
+	{
+		Error = TEXT("Source widget has no parent (it is the root); pass 'parent_widget'");
+	}
+	if (!Parent)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(Error);
+	}
+
+	UWidget* NewWidget = Cast<UWidget>(StaticDuplicateObject(Source, Tree, FName(*NewName)));
+	if (!NewWidget)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(TEXT("Failed to duplicate widget"));
+	}
+	NewWidget->SetFlags(RF_Transactional);
+	NewWidget->Slot = nullptr; // duplicated pointer still references the source's slot
+
+	UPanelSlot* NewSlot = Parent->AddChild(NewWidget);
+	if (!NewSlot)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(TEXT("Failed to add duplicate to parent panel"));
+	}
+
+	// Copy slot layout from the source (skip the owner/content back-references)
+	UPanelSlot* SourceSlot = Source->Slot;
+	if (SourceSlot && SourceSlot->GetClass() == NewSlot->GetClass())
+	{
+		for (TFieldIterator<FProperty> It(SourceSlot->GetClass()); It; ++It)
+		{
+			FProperty* Property = *It;
+			if (Property->GetFName() == TEXT("Parent") || Property->GetFName() == TEXT("Content")
+				|| Property->HasAnyPropertyFlags(CPF_Transient))
+			{
+				continue;
+			}
+			Property->CopyCompleteValue_InContainer(NewSlot, SourceSlot);
+		}
+	}
+	ApplyCanvasSlotLayout(NewSlot, Params);
+
+	CompileAndSaveWidgetBlueprint(WidgetBlueprint);
+
+	TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+	ResultObj->SetBoolField(TEXT("success"), true);
+	ResultObj->SetStringField(TEXT("widget_name"), NewName);
+	ResultObj->SetStringField(TEXT("class"), NewWidget->GetClass()->GetName());
+	ResultObj->SetStringField(TEXT("parent"), Parent->GetName());
+	return ResultObj;
+}
+
+// =============================================================================
+// FRemoveWidgetAction
+// =============================================================================
+
+bool FRemoveWidgetAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	if (!Params->HasField(TEXT("widget_name")))
+	{
+		OutError = TEXT("Missing 'widget_name' parameter");
+		return false;
+	}
+	if (!Params->HasField(TEXT("target_widget")))
+	{
+		OutError = TEXT("Missing 'target_widget' parameter");
+		return false;
+	}
+	return true;
+}
+
+static void CollectWidgetAndDescendants(UWidget* Widget, TArray<UWidget*>& Out)
+{
+	Out.Add(Widget);
+	if (UPanelWidget* Panel = Cast<UPanelWidget>(Widget))
+	{
+		for (int32 i = 0; i < Panel->GetChildrenCount(); ++i)
+		{
+			CollectWidgetAndDescendants(Panel->GetChildAt(i), Out);
+		}
+	}
+}
+
+TSharedPtr<FJsonObject> FRemoveWidgetAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	FString BlueprintName = Params->GetStringField(TEXT("widget_name"));
+	FString TargetName = Params->GetStringField(TEXT("target_widget"));
+
+	UWidgetBlueprint* WidgetBlueprint = FindWidgetBlueprintByName(BlueprintName);
+	if (!WidgetBlueprint)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(FString::Printf(
+			TEXT("Widget Blueprint '%s' not found in /Game/UI, /Game/Widgets, or /Game"), *BlueprintName));
+	}
+
+	UWidgetTree* Tree = WidgetBlueprint->WidgetTree;
+	UWidget* Target = Tree->FindWidget(FName(*TargetName));
+	if (!Target)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(FString::Printf(
+			TEXT("Widget '%s' not found in '%s'"), *TargetName, *BlueprintName));
+	}
+	if (Target == Tree->RootWidget)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(TEXT("The root widget cannot be removed; remove its children instead"));
+	}
+
+	TArray<UWidget*> ToRemove;
+	CollectWidgetAndDescendants(Target, ToRemove);
+
+	TArray<TSharedPtr<FJsonValue>> RemovedNames;
+	for (UWidget* Widget : ToRemove)
+	{
+		RemovedNames.Add(MakeShared<FJsonValueString>(Widget->GetName()));
+	}
+
+	// Detach from the tree first, then move the removed widgets out so their names can be reused
+	Tree->Modify();
+	Tree->RemoveWidget(Target);
+	for (UWidget* Widget : ToRemove)
+	{
+		Widget->Rename(nullptr, GetTransientPackage(), REN_DontCreateRedirectors | REN_NonTransactional | REN_ForceNoResetLoaders);
+		Widget->ClearFlags(RF_Public | RF_Standalone);
+	}
+
+	CompileAndSaveWidgetBlueprint(WidgetBlueprint);
+
+	TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+	ResultObj->SetBoolField(TEXT("success"), true);
+	ResultObj->SetArrayField(TEXT("removed"), RemovedNames);
 	return ResultObj;
 }
 

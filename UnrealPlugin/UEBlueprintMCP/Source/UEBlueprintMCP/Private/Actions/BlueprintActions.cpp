@@ -7,6 +7,7 @@
 #include "Engine/SimpleConstructionScript.h"
 #include "Engine/SCS_Node.h"
 #include "WidgetBlueprint.h"
+#include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Widget.h"
 #include "Engine/World.h"
@@ -39,11 +40,62 @@
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "FileHelpers.h"
+#include "Misc/PackageName.h"
 #include "UObject/SavePackage.h"
 
 // ============================================================================
 // FCreateBlueprintAction
 // ============================================================================
+
+namespace
+{
+	/**
+	 * Split the user-supplied 'name' into a package directory (always ending in '/') and an asset name.
+	 * Accepts a plain name ("BP_Foo", created in /Game/Blueprints/) or a full asset path
+	 * ("/Game/Some/Folder/BP_Foo" or "/Game/Some/Folder/BP_Foo.BP_Foo").
+	 * Never produces a package name with double slashes, which is a fatal engine error.
+	 */
+	bool ParseBlueprintTarget(const FString& RawName, FString& OutPackagePath, FString& OutAssetName, FString& OutError)
+	{
+		FString Name = RawName.TrimStartAndEnd();
+
+		// Drop an optional ".ObjectName" suffix (object path form)
+		int32 DotIndex = INDEX_NONE;
+		if (Name.FindChar(TEXT('.'), DotIndex))
+		{
+			Name = Name.Left(DotIndex);
+		}
+
+		if (Name.StartsWith(TEXT("/")))
+		{
+			// Collapse repeated slashes and drop a trailing one
+			while (Name.ReplaceInline(TEXT("//"), TEXT("/")) > 0) {}
+			Name.RemoveFromEnd(TEXT("/"));
+
+			int32 SlashIndex = INDEX_NONE;
+			Name.FindLastChar(TEXT('/'), SlashIndex);
+			OutPackagePath = Name.Left(SlashIndex + 1);
+			OutAssetName = Name.Mid(SlashIndex + 1);
+
+		}
+		else
+		{
+			OutPackagePath = TEXT("/Game/Blueprints/");
+			OutAssetName = Name;
+		}
+
+		FText ReasonText;
+		if (OutAssetName.IsEmpty() || OutAssetName.Contains(TEXT("/")) ||
+			!FPackageName::IsValidLongPackageName(OutPackagePath + OutAssetName, false, &ReasonText))
+		{
+			const FString Reason = ReasonText.ToString();
+			OutError = FString::Printf(TEXT("Invalid Blueprint name/path '%s'%s. Use a plain name (created in /Game/Blueprints/) or a full path like /Game/Folder/BP_Name."),
+				*RawName, Reason.IsEmpty() ? TEXT("") : *FString::Printf(TEXT(": %s"), *Reason));
+			return false;
+		}
+		return true;
+	}
+}
 
 bool FCreateBlueprintAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
 {
@@ -52,31 +104,38 @@ bool FCreateBlueprintAction::Validate(const TSharedPtr<FJsonObject>& Params, FMC
 	{
 		return false;
 	}
-	return true;
+
+	FString PackagePath, AssetName;
+	return ParseBlueprintTarget(BlueprintName, PackagePath, AssetName, OutError);
 }
 
 TSharedPtr<FJsonObject> FCreateBlueprintAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
 {
-	FString BlueprintName;
+	FString RawName;
 	FString Error;
-	GetRequiredString(Params, TEXT("name"), BlueprintName, Error);
+	GetRequiredString(Params, TEXT("name"), RawName, Error);
 
 	FString ParentClassName = GetOptionalString(Params, TEXT("parent_class"), TEXT("Actor"));
-	FString PackagePath = TEXT("/Game/Blueprints/");
+	FString PackagePath;
+	FString BlueprintName;
+	if (!ParseBlueprintTarget(RawName, PackagePath, BlueprintName, Error))
+	{
+		return CreateErrorResponse(Error, TEXT("validation_failed"));
+	}
 	FString FullAssetPath = PackagePath + BlueprintName;
 
-	// Clean up existing Blueprint if any
-	CleanupExistingBlueprint(BlueprintName, PackagePath);
-
-	// Resolve parent class
+	// Resolve parent class first so a bad parent never deletes an existing asset
 	UClass* ParentClass = ResolveParentClass(ParentClassName);
 	if (!ParentClass)
 	{
 		return CreateErrorResponse(
-			FString::Printf(TEXT("Could not resolve parent class: %s"), *ParentClassName),
+			FString::Printf(TEXT("Could not resolve parent class: %s. Use a native class name, a class path (/Script/Module.Class) or a Blueprint (short name or /Game/Folder/BP_Name)."), *ParentClassName),
 			TEXT("invalid_parent_class")
 		);
 	}
+
+	// Clean up existing Blueprint if any
+	CleanupExistingBlueprint(BlueprintName, PackagePath);
 
 	// Create the Blueprint factory
 	UBlueprintFactory* Factory = NewObject<UBlueprintFactory>();
@@ -117,8 +176,25 @@ TSharedPtr<FJsonObject> FCreateBlueprintAction::ExecuteInternal(const TSharedPtr
 	return CreateSuccessResponse(Result);
 }
 
-UClass* FCreateBlueprintAction::ResolveParentClass(const FString& ParentClassName) const
+UClass* FCreateBlueprintAction::ResolveParentClass(const FString& ParentClassName)
 {
+	// Explicit asset/class path: "/Script/Module.Class", "/Game/Folder/BP_Name" or "/Game/Folder/BP_Name.BP_Name_C"
+	if (ParentClassName.StartsWith(TEXT("/")))
+	{
+		if (UClass* PathClass = LoadObject<UClass>(nullptr, *ParentClassName))
+		{
+			return PathClass;
+		}
+		FString BlueprintAssetPath = ParentClassName;
+		int32 DotIndex = INDEX_NONE;
+		if (BlueprintAssetPath.FindChar(TEXT('.'), DotIndex))
+		{
+			BlueprintAssetPath = BlueprintAssetPath.Left(DotIndex);
+		}
+		UBlueprint* PathBlueprint = FMCPCommonUtils::FindBlueprint(BlueprintAssetPath);
+		return PathBlueprint ? PathBlueprint->GeneratedClass : nullptr;
+	}
+
 	// Direct StaticClass lookups for common classes
 	if (ParentClassName == TEXT("Actor") || ParentClassName == TEXT("AActor"))
 	{
@@ -173,18 +249,18 @@ UClass* FCreateBlueprintAction::ResolveParentClass(const FString& ParentClassNam
 		}
 	}
 
-	// Try as Blueprint parent
-	FString BlueprintPath = FString::Printf(TEXT("/Game/Blueprints/%s.%s"), *ParentClassName, *ParentClassName);
-	UBlueprint* ParentBlueprint = Cast<UBlueprint>(UEditorAssetLibrary::LoadAsset(BlueprintPath));
+	// Try as Blueprint parent (short name searched across the whole project)
+	FString BlueprintShortName = ParentClassName;
+	BlueprintShortName.RemoveFromEnd(TEXT("_C"));
+	UBlueprint* ParentBlueprint = FMCPCommonUtils::FindBlueprint(BlueprintShortName);
 	if (ParentBlueprint && ParentBlueprint->GeneratedClass)
 	{
 		return ParentBlueprint->GeneratedClass;
 	}
 
-	// Fallback to Actor
-	UE_LOG(LogTemp, Warning, TEXT("UEBlueprintMCP: Could not resolve parent class '%s', defaulting to AActor"),
-		*ParentClassName);
-	return AActor::StaticClass();
+	// Unresolved: fail instead of silently creating the Blueprint with the wrong parent
+	UE_LOG(LogTemp, Warning, TEXT("UEBlueprintMCP: Could not resolve parent class '%s'"), *ParentClassName);
+	return nullptr;
 }
 
 void FCreateBlueprintAction::CleanupExistingBlueprint(const FString& BlueprintName, const FString& PackagePath) const
@@ -960,15 +1036,47 @@ bool FSetBlueprintPropertyAction::Validate(const TSharedPtr<FJsonObject>& Params
 		return false;
 	}
 
-	FString PropertyName;
-	if (!GetRequiredString(Params, TEXT("property_name"), PropertyName, OutError))
+	const FString ParentClassName = GetOptionalString(Params, TEXT("parent_class"));
+	const bool bReparent = !ParentClassName.IsEmpty();
+
+	if (bReparent)
 	{
-		return false;
+		UBlueprint* Blueprint = GetTargetBlueprint(Params, Context);
+		UClass* NewParent = FCreateBlueprintAction::ResolveParentClass(ParentClassName);
+		if (!NewParent)
+		{
+			OutError = FString::Printf(TEXT("Could not resolve parent class '%s'. Use a native class name, a class path (/Script/Module.Class) or a Blueprint (short name or /Game/Folder/BP_Name)."), *ParentClassName);
+			return false;
+		}
+		if (!FKismetEditorUtilities::CanCreateBlueprintOfClass(NewParent))
+		{
+			OutError = FString::Printf(TEXT("Class '%s' cannot be used as a Blueprint parent."), *NewParent->GetName());
+			return false;
+		}
+		if (Blueprint && Blueprint->GeneratedClass && NewParent->IsChildOf(Blueprint->GeneratedClass))
+		{
+			OutError = FString::Printf(TEXT("Class '%s' derives from Blueprint '%s' itself; reparenting would create a cycle."), *NewParent->GetName(), *Blueprint->GetName());
+			return false;
+		}
+		if (Blueprint && Cast<UWidgetBlueprint>(Blueprint) && !NewParent->IsChildOf(UUserWidget::StaticClass()))
+		{
+			OutError = FString::Printf(TEXT("Widget Blueprint '%s' can only be reparented to a UserWidget class, got '%s'."), *Blueprint->GetName(), *NewParent->GetName());
+			return false;
+		}
 	}
-	if (!Params->HasField(TEXT("property_value")))
+
+	if (!bReparent || Params->HasField(TEXT("property_name")))
 	{
-		OutError = TEXT("Missing 'property_value' parameter");
-		return false;
+		FString PropertyName;
+		if (!GetRequiredString(Params, TEXT("property_name"), PropertyName, OutError))
+		{
+			return false;
+		}
+		if (!Params->HasField(TEXT("property_value")))
+		{
+			OutError = TEXT("Missing 'property_value' parameter");
+			return false;
+		}
 	}
 
 	return true;
@@ -977,6 +1085,39 @@ bool FSetBlueprintPropertyAction::Validate(const TSharedPtr<FJsonObject>& Params
 TSharedPtr<FJsonObject> FSetBlueprintPropertyAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
 {
 	UBlueprint* Blueprint = GetTargetBlueprint(Params, Context);
+	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+
+	// Optional reparent (validated above)
+	const FString ParentClassName = GetOptionalString(Params, TEXT("parent_class"));
+	if (!ParentClassName.IsEmpty())
+	{
+		UClass* NewParent = FCreateBlueprintAction::ResolveParentClass(ParentClassName);
+		const FString OldParentName = Blueprint->ParentClass ? Blueprint->ParentClass->GetName() : FString();
+
+		if (Blueprint->ParentClass != NewParent)
+		{
+			Blueprint->Modify();
+			Blueprint->ParentClass = NewParent;
+			FBlueprintEditorUtils::RefreshAllNodes(Blueprint);
+			FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+			FKismetEditorUtilities::CompileBlueprint(Blueprint);
+			MarkBlueprintModified(Blueprint, Context);
+
+			UE_LOG(LogTemp, Log, TEXT("UEBlueprintMCP: Reparented Blueprint '%s' from '%s' to '%s'"),
+				*Blueprint->GetName(), *OldParentName, *NewParent->GetName());
+		}
+
+		Result->SetStringField(TEXT("old_parent_class"), OldParentName);
+		Result->SetStringField(TEXT("parent_class"), NewParent->GetName());
+		Result->SetBoolField(TEXT("compiled_without_errors"), Blueprint->Status != EBlueprintStatus::BS_Error);
+
+		if (!Params->HasField(TEXT("property_name")))
+		{
+			Result->SetBoolField(TEXT("success"), true);
+			return CreateSuccessResponse(Result);
+		}
+	}
+
 	FString Error;
 	FString PropertyName;
 	GetRequiredString(Params, TEXT("property_name"), PropertyName, Error);
@@ -1008,7 +1149,6 @@ TSharedPtr<FJsonObject> FSetBlueprintPropertyAction::ExecuteInternal(const TShar
 	UE_LOG(LogTemp, Log, TEXT("UEBlueprintMCP: Set property '%s' on Blueprint '%s'"),
 		*PropertyName, *Blueprint->GetName());
 
-	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetStringField(TEXT("property"), PropertyName);
 	Result->SetBoolField(TEXT("success"), true);
 	return CreateSuccessResponse(Result);

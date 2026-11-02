@@ -34,8 +34,8 @@ def get_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "name": {"type": "string", "description": "Name of the Blueprint"},
-                    "parent_class": {"type": "string", "description": "Parent class (Actor, Pawn, GameStateBase, etc.)"}
+                    "name": {"type": "string", "description": "Plain name (created in /Game/Blueprints/) or full asset path (e.g. /Game/Folder/BP_Name)"},
+                    "parent_class": {"type": "string", "description": "Parent class: native name (Actor, Pawn, GameStateBase, ...), class path (/Script/Module.Class), or Blueprint short name / asset path (e.g. BP_Base or /Game/Folder/BP_Base)"}
                 },
                 "required": ["name", "parent_class"]
             }
@@ -212,15 +212,20 @@ def get_tools() -> list[Tool]:
         ),
         Tool(
             name="set_blueprint_property",
-            description="Set a property on a Blueprint class default object.",
+            description=(
+                "Set a property on a Blueprint class default object and/or reparent the Blueprint. "
+                "Pass parent_class to change the parent (the Blueprint is refreshed and compiled); "
+                "property_name/property_value are then optional."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
-                    "property_name": {"type": "string", "description": "Name of the property"},
-                    "property_value": {"type": "string", "description": "Value to set"}
+                    "blueprint_name": {"type": "string", "description": "Name or full asset path of the Blueprint"},
+                    "property_name": {"type": "string", "description": "Name of the property (required unless parent_class is given)"},
+                    "property_value": {"type": "string", "description": "Value to set (required with property_name)"},
+                    "parent_class": {"type": "string", "description": "New parent: native name (Actor, Pawn, ...), class path (/Script/Module.Class), or Blueprint short name / asset path (e.g. BP_Base or /Game/Folder/BP_Base)"}
                 },
-                "required": ["blueprint_name", "property_name", "property_value"]
+                "required": ["blueprint_name"]
             }
         ),
 

@@ -220,6 +220,9 @@ void UMCPBridge::RegisterActions()
 	ActionHandlers.Add(TEXT("create_umg_widget_blueprint"), MakeShared<FCreateUMGWidgetBlueprintAction>());
 	ActionHandlers.Add(TEXT("add_text_block_to_widget"), MakeShared<FAddTextBlockToWidgetAction>());
 	ActionHandlers.Add(TEXT("add_button_to_widget"), MakeShared<FAddButtonToWidgetAction>());
+	ActionHandlers.Add(TEXT("add_image_to_widget"), MakeShared<FAddImageToWidgetAction>());
+	ActionHandlers.Add(TEXT("duplicate_widget"), MakeShared<FDuplicateWidgetAction>());
+	ActionHandlers.Add(TEXT("remove_widget"), MakeShared<FRemoveWidgetAction>());
 	ActionHandlers.Add(TEXT("bind_widget_event"), MakeShared<FBindWidgetEventAction>());
 	ActionHandlers.Add(TEXT("add_widget_to_viewport"), MakeShared<FAddWidgetToViewportAction>());
 	ActionHandlers.Add(TEXT("set_text_block_binding"), MakeShared<FSetTextBlockBindingAction>());

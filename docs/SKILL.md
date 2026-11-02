@@ -16,7 +16,7 @@ This skill provides specialized knowledge for working with Unreal Engine Bluepri
 ## MCP Tools Available for Blueprint Manipulation
 
 ### Blueprint Creation & Management
-- `create_blueprint` - Create new Blueprint class (supports parent: Actor, Pawn, PlayerController, GameModeBase, GameStateBase)
+- `create_blueprint` - Create new Blueprint class. `name` is a plain name (created in `/Game/Blueprints/`) or a full asset path (`/Game/Folder/BP_Name`, created there). `parent_class`: native name (Actor, Pawn, PlayerController, GameModeBase, GameStateBase, ...), class path (`/Script/Module.Class`) or a Blueprint (short name or `/Game/Folder/BP_Base`). Invalid names/paths return `validation_failed`; an unresolvable parent returns `invalid_parent_class` (no silent fallback to Actor). To fix a wrong parent use `set_blueprint_property` with `parent_class`.
 - `compile_blueprint` - Compile and auto-save; returns error_count, warning_count, detailed errors with node IDs
 - `find_in_blueprints` - Global text search across all Blueprint assets (like the editor's "Find in Blueprints"): node titles (e.g. `Set Health`), function/variable/event/macro/cast-target names and owner classes, node comments, unlinked input-pin default values, Blueprint variables and graph names. Results are grouped per Blueprint; node matches carry `node_guid`, `graph`, `matched_on` (usable with `get_node_pins` / `find_blueprint_nodes`). Params: `query`, `path` (default `/Game`), `scope` (`nodes`, `pin_defaults`, `pins`, `variables`, `graphs`), `case_sensitive`, `limit` (default 50), `time_budget_seconds` (default 10). Blueprints are loaded on demand; if `complete=false`, repeat with `offset=next_offset`. Narrow `path` for speed.
 - `find_blueprint_nodes` - List nodes in a graph (guid, class, title, position, comment, plus function_name/function_owner, variable_name, event_name, macro_name, cast_target). `detail="full"` adds every pin with defaults and `linked_to` connections (enough to trace execution flow). Filters: `node_type` (Event/Function/Variable/Macro/Cast/Comment), `event_name`; paging: `limit`/`offset`. `graph_name` accepts function, macro, event dispatcher signature, interface and collapsed graphs
@@ -85,6 +85,7 @@ This skill provides specialized knowledge for working with Unreal Engine Bluepri
 - All node commands support `graph_name` parameter to add nodes to function graphs instead of event graph
 
 ### Pin & Connection Management
+- `add_image_to_widget` / `duplicate_widget` / `remove_widget` - Widget Blueprint tree edits. `add_image_to_widget`: `image_name`, `parent_widget` (default root), `brush_path` (Texture2D/Material), `color`, `position`, `size`. `duplicate_widget`: `source_widget`, `new_name`, optional `parent_widget`/`position`/`size`; copies properties and slot layout, leaf widgets only. `remove_widget`: `target_widget` plus descendants (not the root); graph nodes referencing it will fail to compile. `create_umg_widget_blueprint` accepts `duplicate_from` to copy an existing Widget Blueprint (use `path` for the destination folder). Tick "Is Variable" afterwards with `set_component_property`.
 - `connect_blueprint_nodes` - Wire two nodes together (source_node_id, source_pin, target_node_id, target_pin); supports `graph_name`. Pass `connections` (array of those four fields) to wire many pins in ONE call: preferred over repeated calls, especially on Widget Blueprints. A partial failure reports how many were applied and which indices failed.
 - `set_node_pin_default` - Set default value; handles object pins by loading assets with StaticLoadObject
 
@@ -306,7 +307,7 @@ FEditorAction (base)
 | `EditorActions.cpp` | Actor manipulation, viewport, save_all |
 | `NodeActions.cpp` | 40+ node types: events, variables, functions, dispatchers, spawn |
 | `ProjectActions.cpp` | Enhanced Input: actions, mapping contexts, key bindings |
-| `UMGActions.cpp` | Widget blueprints, text blocks, buttons, bindings |
+| `UMGActions.cpp` | Widget blueprints, text blocks, buttons, images, widget duplicate/remove, bindings |
 
 ## Extending the MCP (Adding New Commands)
 
