@@ -32,6 +32,20 @@ protected:
 };
 
 /**
+ * Add any widget (UMG class or Widget Blueprint) to a Widget Blueprint's designer tree, or put it in place of an
+ * existing widget (same slot and layout), and set its properties from Unreal text
+ */
+class UEBLUEPRINTMCP_API FAddWidgetToWidgetAction : public FEditorAction
+{
+public:
+	virtual FString GetActionName() const override { return TEXT("AddWidgetToWidget"); }
+
+protected:
+	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
+	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
+};
+
+/**
  * Add a Button to a Widget Blueprint
  */
 class UEBLUEPRINTMCP_API FAddButtonToWidgetAction : public FEditorAction

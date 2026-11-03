@@ -163,8 +163,15 @@ namespace MCPCompat
 #endif
 	}
 
+	/** Handle returned by AddCoreTicker: FTSTicker has its own handle type in UE5 (a plain FDelegateHandle does not convert in 5.8). */
+#if MCP_UE5
+	using FTickerHandle = FTSTicker::FDelegateHandle;
+#else
+	using FTickerHandle = FDelegateHandle;
+#endif
+
 	/** Add a game-thread core ticker. Delegate returns true to keep ticking, false to stop. FTSTicker (UE5) / FTicker (UE4). */
-	inline FDelegateHandle AddCoreTicker(TFunction<bool(float)> Callback, float DelaySeconds)
+	inline FTickerHandle AddCoreTicker(TFunction<bool(float)> Callback, float DelaySeconds)
 	{
 #if MCP_UE5
 		return FTSTicker::GetCoreTicker().AddTicker(FTickerDelegate::CreateLambda(MoveTemp(Callback)), DelaySeconds);
@@ -173,7 +180,7 @@ namespace MCPCompat
 #endif
 	}
 
-	inline void RemoveCoreTicker(FDelegateHandle Handle)
+	inline void RemoveCoreTicker(FTickerHandle Handle)
 	{
 #if MCP_UE5
 		FTSTicker::GetCoreTicker().RemoveTicker(Handle);

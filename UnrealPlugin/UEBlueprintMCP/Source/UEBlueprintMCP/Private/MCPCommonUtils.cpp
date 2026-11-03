@@ -17,6 +17,7 @@
 #include "K2Node_Event.h"
 #include "K2Node_ComponentBoundEvent.h"
 #include "K2Node_CallFunction.h"
+#include "K2Node_Message.h"
 #include "K2Node_VariableGet.h"
 #include "K2Node_VariableSet.h"
 #include "K2Node_CustomEvent.h"
@@ -757,6 +758,24 @@ bool FMCPCommonUtils::SetObjectProperty(UObject* Object, const FString& Property
 		return false;
 	}
 
+	// Anything not handled above (e.g. a struct other than FVector / FRotator)
+	if (Value->Type == EJson::String)
+	{
+		// Any other type (arrays, object / soft references, sets, maps) in Unreal's text format,
+		// e.g. an array of classes: ("/Game/A/A.A_C","/Game/B/B.B_C")
+#if ENGINE_MAJOR_VERSION >= 5 && ENGINE_MINOR_VERSION >= 1 || ENGINE_MAJOR_VERSION > 5
+		const TCHAR* End = Property->ImportText_Direct(*Value->AsString(), PropertyAddr, Object, PPF_None);
+#else
+		const TCHAR* End = Property->ImportText(*Value->AsString(), PropertyAddr, PPF_None, Object);
+#endif
+		if (End)
+		{
+			return true;
+		}
+		OutErrorMessage = FString::Printf(TEXT("Could not import '%s' into %s (%s)"), *Value->AsString(), *PropertyName, *Property->GetCPPType());
+		return false;
+	}
+
 	OutErrorMessage = FString::Printf(TEXT("Unsupported property type for: %s"), *PropertyName);
 	return false;
 }
@@ -898,7 +917,9 @@ UK2Node_CallFunction* FMCPCommonUtils::CreateFunctionCallNode(UEdGraph* Graph, U
 		return nullptr;
 	}
 
-	UK2Node_CallFunction* FunctionNode = NewObject<UK2Node_CallFunction>(Graph);
+	// Interface functions are sent as messages (any object as target), like dragging them from the palette
+	const UClass* Owner = Function->GetOwnerClass();
+	UK2Node_CallFunction* FunctionNode = (Owner && Owner->HasAnyClassFlags(CLASS_Interface)) ? NewObject<UK2Node_Message>(Graph) : NewObject<UK2Node_CallFunction>(Graph);
 	if (!FunctionNode)
 	{
 		return nullptr;

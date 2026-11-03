@@ -7,6 +7,7 @@ import json
 from typing import Any
 from mcp.types import Tool, TextContent
 
+from .. import compact
 from ..connection import get_connection
 
 
@@ -15,8 +16,8 @@ def _send_command_sync(command_type: str, params: dict | None = None) -> list[Te
     conn = get_connection()
     if not conn.is_connected:
         conn.connect()
-    result = conn.send_command(command_type, params)
-    return [TextContent(type="text", text=json.dumps(result.to_dict(), indent=2))]
+    result = conn.send_command(command_type, compact.strip_local(params))
+    return [TextContent(type="text", text=compact.dumps(result.to_dict(), command_type, params))]
 
 
 async def _send_command(command_type: str, params: dict | None = None) -> list[TextContent]:
@@ -289,6 +290,21 @@ def get_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="set_node_property",
+            description="Read or set a property of the node itself (e.g. bExecuteWhenPaused, bConsumeInput on an input key event). No value = read it.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "blueprint_name": {"type": "string"},
+                    "node_id": {"type": "string"},
+                    "property_name": {"type": "string"},
+                    "value": {"type": "string", "description": "Unreal text, e.g. True"},
+                    "graph_name": {"type": "string"}
+                },
+                "required": ["blueprint_name", "node_id", "property_name"]
+            }
+        ),
+        Tool(
             name="set_object_property",
             description="Create a Set Property node for an external object (e.g., bShowMouseCursor on PlayerController).",
             inputSchema={
@@ -454,7 +470,7 @@ def get_tools() -> list[Tool]:
                     "graph_name": {"type": "string", "description": "Graph name (defaults to event graph). See get_blueprint_info 'graphs'."},
                     "node_type": {"type": "string", "description": "Filter: Event, Function, Variable, Macro, Cast, Comment, All (default All)"},
                     "event_name": {"type": "string", "description": "With node_type=Event: specific event (ReceiveBeginPlay, custom event name, ...)"},
-                    "detail": {"type": "string", "enum": ["basic", "full"], "description": "'full' adds pins with defaults and connections (default basic)"},
+                    "detail": {"type": "string", "enum": ["compact", "basic", "full"], "description": "'compact' = one 'guid title' string per node; 'full' adds pins with defaults and connections (default basic)"},
                     "limit": {"type": "integer", "description": "Max nodes to return (0 = no limit)"},
                     "offset": {"type": "integer", "description": "Skip this many matching nodes (for paging)"}
                 },
@@ -530,6 +546,54 @@ def get_tools() -> list[Tool]:
                 "required": ["blueprint_name", "node_id", "node_position"]
             }
         ),
+        Tool(
+            name="get_graph_connections",
+            description="Read a whole graph in one compact call: numbered nodes ('index title | guid'), links 'from.pin>to.pin' (output to input), unlinked input defaults 'node.pin=value', and the names of all graphs in the Blueprint. Read-only.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
+                    "graph_name": {"type": "string", "description": "Optional function graph name (defaults to event graph)"}
+                },
+                "required": ["blueprint_name"]
+            }
+        ),
+        Tool(
+            name="convert_to_validated_get",
+            description="Convert a variable Get node to a Validated Get (object/class: exec pins execute, then=Is Valid, else=Is Not Valid) or a Branch (bool: then=True, else=False), or back to a pure Get with pure=true. Links on the value pin are kept; wire the exec pins afterwards.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
+                    "node_id": {"type": "string", "description": "GUID of the variable Get node"},
+                    "pure": {"type": "boolean", "description": "true converts back to a pure Get (default false)"},
+                    "graph_name": {"type": "string", "description": "Optional function graph name (defaults to event graph)"}
+                },
+                "required": ["blueprint_name", "node_id"]
+            }
+        ),
+        Tool(
+            name="batch",
+            description="Run several commands in ONE call (any tool name of this server as 'type', e.g. add_blueprint_function_node, connect_blueprint_nodes, compile_blueprint). A string param '$N.field' is replaced by that field of command N's result (0-based), e.g. '$0.node_id'. Stops at the first failure unless stop_on_error is false.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "commands": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "type": {"type": "string", "description": "Command (tool) name"},
+                                "params": {"type": "object", "description": "That command's parameters"}
+                            },
+                            "required": ["type"]
+                        }
+                    },
+                    "stop_on_error": {"type": "boolean", "description": "Default true"}
+                },
+                "required": ["commands"]
+            }
+        ),
     ]
 
 
@@ -553,6 +617,7 @@ TOOL_HANDLERS = {
     "add_blueprint_variable_get": "add_blueprint_variable_get",
     "add_blueprint_variable_set": "add_blueprint_variable_set",
     "set_node_pin_default": "set_node_pin_default",
+    "set_node_property": "set_node_property",
     "set_object_property": "set_object_property",
     # References
     "add_blueprint_get_self_component_reference": "add_blueprint_get_self_component_reference",
@@ -569,6 +634,9 @@ TOOL_HANDLERS = {
     "find_in_blueprints": "find_in_blueprints",
     "delete_blueprint_node": "delete_blueprint_node",
     "get_node_pins": "get_node_pins",
+    "get_graph_connections": "get_graph_connections",
+    "convert_to_validated_get": "convert_to_validated_get",
+    "batch": "batch",
     "set_node_position": "set_node_position",
 }
 

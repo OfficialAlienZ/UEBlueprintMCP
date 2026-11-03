@@ -7,6 +7,7 @@ import json
 from typing import Any
 from mcp.types import Tool, TextContent
 
+from .. import compact
 from ..connection import get_connection
 
 
@@ -15,8 +16,8 @@ def _send_command_sync(command_type: str, params: dict | None = None) -> list[Te
     conn = get_connection()
     if not conn.is_connected:
         conn.connect()
-    result = conn.send_command(command_type, params)
-    return [TextContent(type="text", text=json.dumps(result.to_dict(), indent=2))]
+    result = conn.send_command(command_type, compact.strip_local(params))
+    return [TextContent(type="text", text=compact.dumps(result.to_dict(), command_type, params))]
 
 
 async def _send_command(command_type: str, params: dict | None = None) -> list[TextContent]:
@@ -53,9 +54,31 @@ def get_tools() -> list[Tool]:
                     "position": {"type": "array", "items": {"type": "number"}, "description": "[X, Y] position"},
                     "size": {"type": "array", "items": {"type": "number"}, "description": "[Width, Height]"},
                     "font_size": {"type": "integer", "description": "Font size in points"},
-                    "color": {"type": "array", "items": {"type": "number"}, "description": "[R, G, B, A] values 0.0-1.0"}
+                    "color": {"type": "array", "items": {"type": "number"}, "description": "[R, G, B, A] values 0.0-1.0"},
+                    "parent_name": {"type": "string", "description": "Optional panel to add it to (e.g. one page of a widget switcher); default is the root canvas"}
                 },
                 "required": ["widget_name", "text_block_name"]
+            }
+        ),
+        Tool(
+            name="add_widget_to_widget",
+            description="Add any widget to a Widget Blueprint's designer tree (UMG class like Image/Border, class path, or another Widget Blueprint), or put it in place of an existing widget ('replace': same slot/layout, old one removed, new one takes its name unless 'name' is given). Properties set from Unreal text.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "widget_name": {"type": "string", "description": "Widget Blueprint to edit (name or path)"},
+                    "widget_class": {"type": "string", "description": "Class of the new widget: UMG class name, /Script/Module.Class, or Widget Blueprint name/path"},
+                    "name": {"type": "string", "description": "Name of the new widget (default: the replaced widget's name)"},
+                    "replace": {"type": "string", "description": "Optional existing widget to replace"},
+                    "parent_name": {"type": "string", "description": "Panel to add it to when not replacing (default root)"},
+                    "position": {"type": "array", "items": {"type": "number"}, "description": "[X, Y] in a canvas"},
+                    "size": {"type": "array", "items": {"type": "number"}, "description": "[Width, Height] in a canvas"},
+                    "anchors": {"type": "array", "items": {"type": "number"}, "description": "[MinX, MinY, MaxX, MaxY] in a canvas, e.g. [1,0,1,0] top right"},
+                    "alignment": {"type": "array", "items": {"type": "number"}, "description": "[X, Y] pivot in a canvas"},
+                    "properties": {"type": "object", "description": "Property name -> Unreal text value, e.g. {\"bFollowPlayer\": \"False\"}"},
+                    "is_variable": {"type": "boolean", "description": "Expose as variable (default true)"}
+                },
+                "required": ["widget_name", "widget_class"]
             }
         ),
         Tool(
@@ -166,6 +189,7 @@ def get_tools() -> list[Tool]:
 TOOL_HANDLERS = {
     "create_umg_widget_blueprint": "create_umg_widget_blueprint",
     "add_text_block_to_widget": "add_text_block_to_widget",
+    "add_widget_to_widget": "add_widget_to_widget",
     "add_button_to_widget": "add_button_to_widget",
     "add_image_to_widget": "add_image_to_widget",
     "duplicate_widget": "duplicate_widget",

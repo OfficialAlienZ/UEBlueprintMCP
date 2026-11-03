@@ -48,7 +48,8 @@ static UWidgetBlueprint* FindWidgetBlueprintByName(const FString& BlueprintName)
 			}
 		}
 	}
-	return nullptr;
+	// Anywhere else: a name found by the asset registry, or a full path such as /Game/TopDown/Widgets/Menu
+	return Cast<UWidgetBlueprint>(FMCPCommonUtils::FindBlueprint(BlueprintName));
 }
 
 // =============================================================================
@@ -80,7 +81,11 @@ TSharedPtr<FJsonObject> FCreateUMGWidgetBlueprintAction::ExecuteInternal(const T
 			PackagePath += TEXT("/");
 		}
 	}
-Duplicate an existing Widget Blueprint instead of creating an empty one
+
+	FString AssetName = BlueprintName;
+	FString FullPath = PackagePath + AssetName;
+
+	// Duplicate an existing Widget Blueprint instead of creating an empty one
 	FString DuplicateFrom;
 	if (Params->TryGetStringField(TEXT("duplicate_from"), DuplicateFrom) && !DuplicateFrom.IsEmpty())
 	{
@@ -112,10 +117,6 @@ Duplicate an existing Widget Blueprint instead of creating an empty one
 		DupResult->SetStringField(TEXT("duplicated_from"), SourceBlueprint->GetPathName());
 		return DupResult;
 	}
-
-	// 
-	FString AssetName = BlueprintName;
-	FString FullPath = PackagePath + AssetName;
 
 	// Aggressive cleanup: remove any existing widget blueprint
 	TArray<FString> PathsToCheck = {
@@ -174,9 +175,22 @@ Duplicate an existing Widget Blueprint instead of creating an empty one
 			TEXT("Failed to clean up existing Widget Blueprint '%s'. Try restarting the editor."), *AssetName));
 	}
 
+	// Optional parent: a UserWidget subclass by name or path (e.g. /Script/MyModule.MyWidget)
+	UClass* ParentClass = UUserWidget::StaticClass();
+	FString ParentParam;
+	if (Params->TryGetStringField(TEXT("parent_class"), ParentParam) && !ParentParam.IsEmpty())
+	{
+		UClass* Found = ParentParam.Contains(TEXT("/")) ? LoadObject<UClass>(nullptr, *ParentParam) : FindFirstObject<UClass>(*ParentParam, EFindFirstObjectOptions::NativeFirst);
+		if (!Found || !Found->IsChildOf(UUserWidget::StaticClass()))
+		{
+			return FMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Parent class '%s' not found or not a UserWidget"), *ParentParam));
+		}
+		ParentClass = Found;
+	}
+
 	// Create Widget Blueprint
 	UBlueprint* NewBlueprint = FKismetEditorUtilities::CreateBlueprint(
-		UUserWidget::StaticClass(),
+		ParentClass,
 		Package,
 		FName(*AssetName),
 		BPTYPE_Normal,
@@ -269,15 +283,56 @@ TSharedPtr<FJsonObject> FAddTextBlockToWidgetAction::ExecuteInternal(const TShar
 
 	TextBlock->SetText(FText::FromString(InitialText));
 
-	// Add to canvas
-	UCanvasPanel* RootCanvas = Cast<UCanvasPanel>(WidgetBlueprint->WidgetTree->RootWidget);
-	if (!RootCanvas)
+	double FontSize = 0.0;
+	if (Params->TryGetNumberField(TEXT("font_size"), FontSize) && FontSize > 0.0)
 	{
-		return FMCPCommonUtils::CreateErrorResponse(TEXT("Root Canvas Panel not found"));
+		FSlateFontInfo Font = TextBlock->GetFont();
+		Font.Size = FontSize;
+		TextBlock->SetFont(Font);
+	}
+	const TArray<TSharedPtr<FJsonValue>>* ColorArray;
+	if (Params->TryGetArrayField(TEXT("color"), ColorArray) && ColorArray->Num() >= 3)
+	{
+		const float Alpha = ColorArray->Num() >= 4 ? (*ColorArray)[3]->AsNumber() : 1.f;
+		TextBlock->SetColorAndOpacity(FSlateColor(FLinearColor((*ColorArray)[0]->AsNumber(), (*ColorArray)[1]->AsNumber(), (*ColorArray)[2]->AsNumber(), Alpha)));
 	}
 
-	UCanvasPanelSlot* PanelSlot = RootCanvas->AddChildToCanvas(TextBlock);
-	PanelSlot->SetPosition(Position);
+	// Add to the root canvas, or to the panel named by parent_name (e.g. one page of a widget switcher)
+	UPanelWidget* Parent = Cast<UPanelWidget>(WidgetBlueprint->WidgetTree->RootWidget);
+	FString ParentName;
+	if (Params->TryGetStringField(TEXT("parent_name"), ParentName) && !ParentName.IsEmpty())
+	{
+		Parent = Cast<UPanelWidget>(WidgetBlueprint->WidgetTree->FindWidget(FName(*ParentName)));
+		if (!Parent)
+		{
+			return FMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Panel '%s' not found"), *ParentName));
+		}
+	}
+	if (!Parent)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(TEXT("Root panel not found"));
+	}
+
+	if (UCanvasPanel* Canvas = Cast<UCanvasPanel>(Parent))
+	{
+		UCanvasPanelSlot* PanelSlot = Canvas->AddChildToCanvas(TextBlock);
+		PanelSlot->SetPosition(Position);
+		const TArray<TSharedPtr<FJsonValue>>* SizeArray;
+		if (Params->TryGetArrayField(TEXT("size"), SizeArray) && SizeArray->Num() >= 2)
+		{
+			PanelSlot->SetSize(FVector2D((*SizeArray)[0]->AsNumber(), (*SizeArray)[1]->AsNumber()));
+		}
+		else
+		{
+			PanelSlot->SetAutoSize(true);
+		}
+	}
+	else
+	{
+		Parent->AddChild(TextBlock);
+	}
+	// Exposed as a variable so the graph can set its text
+	TextBlock->bIsVariable = true;
 
 	// Compile and save
 	FKismetEditorUtilities::CompileBlueprint(WidgetBlueprint);
@@ -287,6 +342,166 @@ TSharedPtr<FJsonObject> FAddTextBlockToWidgetAction::ExecuteInternal(const TShar
 	ResultObj->SetBoolField(TEXT("success"), true);
 	ResultObj->SetStringField(TEXT("widget_name"), WidgetName);
 	ResultObj->SetStringField(TEXT("text"), InitialText);
+	return ResultObj;
+}
+
+// =============================================================================
+// FAddWidgetToWidgetAction
+// =============================================================================
+
+bool FAddWidgetToWidgetAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	if (!Params->HasField(TEXT("widget_name")) || !Params->HasField(TEXT("widget_class")))
+	{
+		OutError = TEXT("Missing 'widget_name' or 'widget_class' parameter");
+		return false;
+	}
+	if (!Params->HasField(TEXT("name")) && !Params->HasField(TEXT("replace")))
+	{
+		OutError = TEXT("Give 'name' (new widget) or 'replace' (widget to put it in place of)");
+		return false;
+	}
+	return true;
+}
+
+TSharedPtr<FJsonObject> FAddWidgetToWidgetAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	const FString BlueprintName = Params->GetStringField(TEXT("widget_name"));
+	UWidgetBlueprint* WidgetBlueprint = FindWidgetBlueprintByName(BlueprintName);
+	if (!WidgetBlueprint)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Widget Blueprint '%s' not found"), *BlueprintName));
+	}
+	UWidgetTree* Tree = WidgetBlueprint->WidgetTree;
+
+	// Class: UMG class name (Image, Border...), class path, or a Widget Blueprint name/path
+	const FString ClassParam = Params->GetStringField(TEXT("widget_class"));
+	UClass* WidgetClass = ClassParam.Contains(TEXT(".")) ? LoadObject<UClass>(nullptr, *ClassParam) : FindFirstObject<UClass>(*ClassParam, EFindFirstObjectOptions::NativeFirst);
+	if (!WidgetClass)
+	{
+		if (UWidgetBlueprint* ClassBlueprint = FindWidgetBlueprintByName(ClassParam))
+		{
+			WidgetClass = ClassBlueprint->GeneratedClass;
+		}
+	}
+	if (!WidgetClass || !WidgetClass->IsChildOf(UWidget::StaticClass()))
+	{
+		return FMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Widget class '%s' not found"), *ClassParam));
+	}
+
+	// Widget to replace: the new one takes its slot (and its name unless 'name' is given)
+	FString ReplaceName;
+	UWidget* Old = nullptr;
+	if (Params->TryGetStringField(TEXT("replace"), ReplaceName) && !ReplaceName.IsEmpty())
+	{
+		Old = Tree->FindWidget(FName(*ReplaceName));
+		if (!Old || !Old->GetParent())
+		{
+			return FMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Widget '%s' not found or has no parent panel"), *ReplaceName));
+		}
+	}
+	FString NewName = ReplaceName;
+	Params->TryGetStringField(TEXT("name"), NewName);
+	if (Old && Old->GetFName() == FName(*NewName))
+	{
+		// Free the name for the new widget
+		Old->Rename(*MakeUniqueObjectName(Tree, Old->GetClass(), FName(*(NewName + TEXT("_Replaced")))).ToString(), nullptr, REN_DontCreateRedirectors | REN_NonTransactional);
+	}
+	else if (Tree->FindWidget(FName(*NewName)))
+	{
+		return FMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("A widget named '%s' already exists"), *NewName));
+	}
+
+	UWidget* NewWidget = Tree->ConstructWidget<UWidget>(WidgetClass, FName(*NewName));
+	if (!NewWidget)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(TEXT("Failed to create the widget"));
+	}
+
+	// Properties as Unreal text, e.g. {"bFollowPlayer": "False", "Visibility": "Collapsed"}
+	TArray<FString> PropertyErrors;
+	const TSharedPtr<FJsonObject>* Properties;
+	if (Params->TryGetObjectField(TEXT("properties"), Properties))
+	{
+		for (const auto& Pair : (*Properties)->Values)
+		{
+			FProperty* Property = FindFProperty<FProperty>(WidgetClass, *FString(Pair.Key));
+			FString Text;
+			if (!Property || !Pair.Value->TryGetString(Text) || !Property->ImportText_InContainer(*Text, NewWidget, NewWidget, PPF_None))
+			{
+				PropertyErrors.Add(FString(Pair.Key));
+			}
+		}
+	}
+
+	if (Old)
+	{
+		UPanelWidget* OldParent = Old->GetParent();
+		OldParent->ReplaceChild(Old, NewWidget);
+		Tree->RemoveWidget(Old);
+	}
+	else
+	{
+		UPanelWidget* Parent = Cast<UPanelWidget>(Tree->RootWidget);
+		FString ParentName;
+		if (Params->TryGetStringField(TEXT("parent_name"), ParentName) && !ParentName.IsEmpty())
+		{
+			Parent = Cast<UPanelWidget>(Tree->FindWidget(FName(*ParentName)));
+		}
+		if (!Parent)
+		{
+			return FMCPCommonUtils::CreateErrorResponse(TEXT("Parent panel not found"));
+		}
+		if (UCanvasPanel* Canvas = Cast<UCanvasPanel>(Parent))
+		{
+			UCanvasPanelSlot* PanelSlot = Canvas->AddChildToCanvas(NewWidget);
+			const TArray<TSharedPtr<FJsonValue>>* PosArray;
+			if (Params->TryGetArrayField(TEXT("position"), PosArray) && PosArray->Num() >= 2)
+			{
+				PanelSlot->SetPosition(FVector2D((*PosArray)[0]->AsNumber(), (*PosArray)[1]->AsNumber()));
+			}
+			const TArray<TSharedPtr<FJsonValue>>* SizeArray;
+			if (Params->TryGetArrayField(TEXT("size"), SizeArray) && SizeArray->Num() >= 2)
+			{
+				PanelSlot->SetSize(FVector2D((*SizeArray)[0]->AsNumber(), (*SizeArray)[1]->AsNumber()));
+			}
+			// [MinX, MinY, MaxX, MaxY], e.g. [1, 0, 1, 0] = top right corner
+			const TArray<TSharedPtr<FJsonValue>>* AnchorArray;
+			if (Params->TryGetArrayField(TEXT("anchors"), AnchorArray) && AnchorArray->Num() >= 4)
+			{
+				PanelSlot->SetAnchors(FAnchors((*AnchorArray)[0]->AsNumber(), (*AnchorArray)[1]->AsNumber(), (*AnchorArray)[2]->AsNumber(), (*AnchorArray)[3]->AsNumber()));
+			}
+			const TArray<TSharedPtr<FJsonValue>>* AlignmentArray;
+			if (Params->TryGetArrayField(TEXT("alignment"), AlignmentArray) && AlignmentArray->Num() >= 2)
+			{
+				PanelSlot->SetAlignment(FVector2D((*AlignmentArray)[0]->AsNumber(), (*AlignmentArray)[1]->AsNumber()));
+			}
+		}
+		else
+		{
+			Parent->AddChild(NewWidget);
+		}
+	}
+	bool bIsVariable = true;
+	Params->TryGetBoolField(TEXT("is_variable"), bIsVariable);
+	NewWidget->bIsVariable = bIsVariable;
+
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WidgetBlueprint);
+	FKismetEditorUtilities::CompileBlueprint(WidgetBlueprint);
+	UEditorAssetLibrary::SaveAsset(WidgetBlueprint->GetPathName(), false);
+
+	TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+	ResultObj->SetBoolField(TEXT("success"), true);
+	ResultObj->SetStringField(TEXT("name"), NewWidget->GetName());
+	ResultObj->SetStringField(TEXT("class"), WidgetClass->GetName());
+	if (Old)
+	{
+		ResultObj->SetStringField(TEXT("replaced"), ReplaceName);
+	}
+	if (PropertyErrors.Num() > 0)
+	{
+		ResultObj->SetStringField(TEXT("properties_not_set"), FString::Join(PropertyErrors, TEXT(", ")));
+	}
 	return ResultObj;
 }
 
@@ -383,7 +598,7 @@ TSharedPtr<FJsonObject> FAddButtonToWidgetAction::ExecuteInternal(const TSharedP
 static UPanelWidget* ResolveParentPanel(UWidgetBlueprint* WidgetBlueprint, const FString& ParentName, FString& OutError)
 {
 	UWidget* ParentWidget = ParentName.IsEmpty()
-		? WidgetBlueprint->WidgetTree->RootWidget
+		? WidgetBlueprint->WidgetTree->RootWidget.Get()
 		: WidgetBlueprint->WidgetTree->FindWidget(FName(*ParentName));
 	if (!ParentWidget)
 	{

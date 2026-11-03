@@ -375,7 +375,8 @@ TSharedPtr<FJsonObject> FExecuteConsoleCommandAction::ExecuteInternal(const TSha
 	const FString WorldName = GetOptionalString(Params, TEXT("world"), TEXT("auto")).ToLower();
 
 	const bool bUsePIE = WorldName == TEXT("pie") || (WorldName == TEXT("auto") && FMCPPIE::IsRunning());
-	UWorld* World = bUsePIE ? GEditor->PlayWorld : GEditor->GetEditorWorldContext().World();
+	// static_cast: PlayWorld is a TObjectPtr in UE5 (the ternary is ambiguous in 5.8) and a raw pointer in 4.27
+	UWorld* World = bUsePIE ? static_cast<UWorld*>(GEditor->PlayWorld) : GEditor->GetEditorWorldContext().World();
 	if (!World)
 	{
 		return CreateErrorResponse(TEXT("Target world is not available."), TEXT("not_found"));

@@ -7,6 +7,7 @@ import json
 from typing import Any
 from mcp.types import Tool, TextContent
 
+from .. import compact
 from ..connection import get_connection
 
 
@@ -15,8 +16,8 @@ def _send_command_sync(command_type: str, params: dict | None = None) -> list[Te
     conn = get_connection()
     if not conn.is_connected:
         conn.connect()
-    result = conn.send_command(command_type, params)
-    return [TextContent(type="text", text=json.dumps(result.to_dict(), indent=2))]
+    result = conn.send_command(command_type, compact.strip_local(params))
+    return [TextContent(type="text", text=compact.dumps(result.to_dict(), command_type, params))]
 
 
 async def _send_command(command_type: str, params: dict | None = None) -> list[TextContent]:
@@ -169,7 +170,7 @@ def get_tools() -> list[Tool]:
                 "or an asset path; the shortcut 'world_settings' is the open level's World Settings with "
                 "DefaultGameMode etc.), actor_name (placed actor, optionally component_name) or blueprint_name "
                 "(class default object, optionally a component template via component_name; accepts 'level:<MapName>'). "
-                "Use property_names to fetch only some properties."
+                "Use property_names to fetch only some properties; without it, empty/false/zero values are left out (include_empty=true keeps them)."
             ),
             inputSchema={
                 "type": "object",
@@ -180,7 +181,8 @@ def get_tools() -> list[Tool]:
                     "blueprint_name": {"type": "string", "description": "Blueprint name/path or 'level:<Map>'; exports its class defaults"},
                     "component_name": {"type": "string", "description": "Component of actor_name / blueprint_name"},
                     "property_names": {"type": "array", "items": {"type": "string"}, "description": "Only these properties (case-insensitive)"},
-                    "editable_only": {"type": "boolean", "description": "Only editor-exposed properties (default false)"}
+                    "editable_only": {"type": "boolean", "description": "Only editor-exposed properties (default false)"},
+                    "include_empty": {"type": "boolean", "description": "Keep empty/false/zero values in a full export (default false)"}
                 }
             }
         ),
@@ -323,10 +325,38 @@ def get_tools() -> list[Tool]:
                 "required": ["material_name"]
             }
         ),
+        Tool(
+            name="remove_from_blueprint",
+            description="Remove from a Blueprint: kind 'component' (own SCS component), 'variable' (and its get/set nodes), 'function' (graph), 'function_input' (input 'name' of function 'function') or 'interface' (implemented interface, by name) or 'widget' (designer tree). Compiles and saves; status Error = something still uses it.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "blueprint_name": {"type": "string"},
+                    "kind": {"type": "string", "enum": ["component", "variable", "function", "function_input", "interface", "widget"]},
+                    "name": {"type": "string"},
+                    "function": {"type": "string", "description": "kind function_input: the function"}
+                },
+                "required": ["blueprint_name", "kind", "name"]
+            }
+        ),
+        Tool(
+            name="delete_asset",
+            description="Delete assets (/Game/... paths). Ones still referenced by other assets are not deleted and listed in not_deleted with their referencers, unless force.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "asset_paths": {"type": "array", "items": {"type": "string"}},
+                    "force": {"type": "boolean"}
+                },
+                "required": ["asset_paths"]
+            }
+        ),
     ]
 
 
 TOOL_HANDLERS = {
+    "remove_from_blueprint": "remove_from_blueprint",
+    "delete_asset": "delete_asset",
     "create_blueprint": "create_blueprint",
     "compile_blueprint": "compile_blueprint",
     "get_blueprint_info": "get_blueprint_info",

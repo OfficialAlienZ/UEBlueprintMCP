@@ -349,7 +349,7 @@ namespace
 {
 	struct FHeldInput
 	{
-		FDelegateHandle Handle;
+		MCPCompat::FTickerHandle Handle;
 		uint32 Serial = 0;
 	};
 

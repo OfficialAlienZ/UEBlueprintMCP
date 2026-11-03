@@ -42,6 +42,10 @@
 #include "FileHelpers.h"
 #include "Misc/PackageName.h"
 #include "UObject/SavePackage.h"
+#include "WidgetBlueprint.h"
+#include "Blueprint/WidgetTree.h"
+#include "K2Node_FunctionEntry.h"
+#include "Misc/PackageName.h"
 
 // ============================================================================
 // FCreateBlueprintAction
@@ -215,6 +219,15 @@ UClass* FCreateBlueprintAction::ResolveParentClass(const FString& ParentClassNam
 	if (ParentClassName == TEXT("PlayerController") || ParentClassName == TEXT("APlayerController"))
 	{
 		return APlayerController::StaticClass();
+	}
+
+	// A full class path (e.g. /Script/MyProject.MyActor or /Game/Path/BP_Parent.BP_Parent_C)
+	if (ParentClassName.Contains(TEXT("/")))
+	{
+		if (UClass* FoundClass = LoadClass<AActor>(nullptr, *ParentClassName))
+		{
+			return FoundClass;
+		}
 	}
 
 	// Build name variants
@@ -538,6 +551,12 @@ TSharedPtr<FJsonObject> FAddComponentToBlueprintAction::ExecuteInternal(const TS
 
 UClass* FAddComponentToBlueprintAction::ResolveComponentClass(const FString& ComponentTypeName) const
 {
+	// A full class path (e.g. /Script/GeometryCollectionEngine.GeometryCollectionComponent or a Blueprint component)
+	if (ComponentTypeName.Contains(TEXT("/")))
+	{
+		return LoadClass<UActorComponent>(nullptr, *ComponentTypeName);
+	}
+
 	// Build candidate names
 	TArray<FString> Candidates;
 	Candidates.Add(ComponentTypeName);
@@ -560,7 +579,9 @@ UClass* FAddComponentToBlueprintAction::ResolveComponentClass(const FString& Com
 		TEXT("/Script/Engine"),
 		TEXT("/Script/UMG"),
 		TEXT("/Script/AIModule"),
-		TEXT("/Script/NavigationSystem")
+		TEXT("/Script/NavigationSystem"),
+		TEXT("/Script/GeometryCollectionEngine"),
+		TEXT("/Script/Niagara")
 	};
 
 	for (const FString& Candidate : Candidates)
@@ -1259,4 +1280,194 @@ TSharedPtr<FJsonObject> FCreateColoredMaterialAction::ExecuteInternal(const TSha
 	Result->SetStringField(TEXT("path"), MaterialPackagePath + TEXT(".") + MaterialName);
 	Result->SetBoolField(TEXT("success"), true);
 	return CreateSuccessResponse(Result);
+}
+
+// =============================================================================
+// FRemoveFromBlueprintAction
+// =============================================================================
+
+bool FRemoveFromBlueprintAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	if (!Params->HasField(TEXT("blueprint_name")) || !Params->HasField(TEXT("kind")) || !Params->HasField(TEXT("name")))
+	{
+		OutError = TEXT("Need 'blueprint_name', 'kind' (component, variable, function, function_input, interface, widget) and 'name'");
+		return false;
+	}
+	return true;
+}
+
+TSharedPtr<FJsonObject> FRemoveFromBlueprintAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	const FString BlueprintName = Params->GetStringField(TEXT("blueprint_name"));
+	UBlueprint* Blueprint = FMCPCommonUtils::FindBlueprint(BlueprintName);
+	if (!Blueprint)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Blueprint '%s' not found"), *BlueprintName));
+	}
+	const FString Kind = Params->GetStringField(TEXT("kind"));
+	const FName Name(*Params->GetStringField(TEXT("name")));
+
+	if (Kind == TEXT("component"))
+	{
+		USCS_Node* Node = Blueprint->SimpleConstructionScript ? Blueprint->SimpleConstructionScript->FindSCSNode(Name) : nullptr;
+		if (!Node)
+		{
+			return FMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Component '%s' not found in this Blueprint (inherited ones are removed in their own Blueprint)"), *Name.ToString()));
+		}
+		Blueprint->SimpleConstructionScript->RemoveNodeAndPromoteChildren(Node);
+	}
+	else if (Kind == TEXT("variable"))
+	{
+		if (FBlueprintEditorUtils::FindNewVariableIndex(Blueprint, Name) == INDEX_NONE)
+		{
+			return FMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Variable '%s' not found"), *Name.ToString()));
+		}
+		FBlueprintEditorUtils::RemoveMemberVariable(Blueprint, Name);
+	}
+	else if (Kind == TEXT("function"))
+	{
+		UEdGraph* Graph = nullptr;
+		for (UEdGraph* Candidate : Blueprint->FunctionGraphs)
+		{
+			if (Candidate && Candidate->GetFName() == Name)
+			{
+				Graph = Candidate;
+			}
+		}
+		if (!Graph)
+		{
+			return FMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Function '%s' not found"), *Name.ToString()));
+		}
+		FBlueprintEditorUtils::RemoveGraph(Blueprint, Graph, EGraphRemoveFlags::Recompile);
+	}
+	else if (Kind == TEXT("function_input"))
+	{
+		const FString FunctionName = Params->HasField(TEXT("function")) ? Params->GetStringField(TEXT("function")) : FString();
+		UK2Node_FunctionEntry* Entry = nullptr;
+		for (UEdGraph* Graph : Blueprint->FunctionGraphs)
+		{
+			if (Graph && Graph->GetName() == FunctionName)
+			{
+				TArray<UK2Node_FunctionEntry*> Entries;
+				Graph->GetNodesOfClass(Entries);
+				Entry = Entries.Num() > 0 ? Entries[0] : nullptr;
+			}
+		}
+		if (!Entry || !Entry->UserDefinedPinExists(Name))
+		{
+			return FMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Input '%s' of function '%s' not found"), *Name.ToString(), *FunctionName));
+		}
+		Entry->Modify();
+		Entry->RemoveUserDefinedPinByName(Name);
+		Entry->ReconstructNode();
+	}
+	else if (Kind == TEXT("interface"))
+	{
+		// Name = the interface's name (Minimappable) or its class path; its event/function graphs go with it
+		FTopLevelAssetPath Found;
+		for (const FBPInterfaceDescription& Description : Blueprint->ImplementedInterfaces)
+		{
+			if (Description.Interface && (Description.Interface->GetName() == Name.ToString() || Description.Interface->GetName() == Name.ToString() + TEXT("_C")))
+			{
+				Found = Description.Interface->GetClassPathName();
+			}
+		}
+		if (Found.IsNull())
+		{
+			return FMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Interface '%s' not implemented by this Blueprint"), *Name.ToString()));
+		}
+		FBlueprintEditorUtils::RemoveInterface(Blueprint, Found, false);
+	}
+	else if (Kind == TEXT("widget"))
+	{
+		UWidgetBlueprint* WidgetBlueprint = Cast<UWidgetBlueprint>(Blueprint);
+		UWidget* Widget = WidgetBlueprint && WidgetBlueprint->WidgetTree ? WidgetBlueprint->WidgetTree->FindWidget(Name) : nullptr;
+		if (!Widget)
+		{
+			return FMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Widget '%s' not found"), *Name.ToString()));
+		}
+		WidgetBlueprint->WidgetTree->RemoveWidget(Widget);
+	}
+	else
+	{
+		return FMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Unknown kind '%s'"), *Kind));
+	}
+
+	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+	FKismetEditorUtilities::CompileBlueprint(Blueprint);
+	UEditorAssetLibrary::SaveAsset(Blueprint->GetPathName(), false);
+
+	TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+	ResultObj->SetBoolField(TEXT("success"), true);
+	ResultObj->SetStringField(TEXT("removed"), Name.ToString());
+	ResultObj->SetStringField(TEXT("status"), Blueprint->Status == BS_Error ? TEXT("Error") : TEXT("UpToDate"));
+	return ResultObj;
+}
+
+// =============================================================================
+// FDeleteAssetAction
+// =============================================================================
+
+bool FDeleteAssetAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	if (!Params->HasField(TEXT("asset_paths")))
+	{
+		OutError = TEXT("Missing 'asset_paths' (list of /Game/... paths)");
+		return false;
+	}
+	return true;
+}
+
+TSharedPtr<FJsonObject> FDeleteAssetAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	bool bForce = false;
+	Params->TryGetBoolField(TEXT("force"), bForce);
+	TArray<FString> Paths;
+	for (const TSharedPtr<FJsonValue>& Value : Params->GetArrayField(TEXT("asset_paths")))
+	{
+		Paths.Add(Value->AsString());
+	}
+	IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+
+	// Assets deleted together may reference each other.
+	TSet<FName> Deleting;
+	for (const FString& Path : Paths)
+	{
+		Deleting.Add(FName(*FPackageName::ObjectPathToPackageName(Path)));
+	}
+	TArray<TSharedPtr<FJsonValue>> Blocked, Deleted;
+	for (const FString& Path : Paths)
+	{
+		TArray<FName> Referencers;
+		Registry.GetReferencers(FName(*FPackageName::ObjectPathToPackageName(Path)), Referencers);
+		TArray<FString> Others;
+		for (const FName& Referencer : Referencers)
+		{
+			if (!Deleting.Contains(Referencer))
+			{
+				Others.Add(Referencer.ToString());
+			}
+		}
+		if (Others.Num() > 0 && !bForce)
+		{
+			Blocked.Add(MakeShared<FJsonValueString>(Path + TEXT(" <- ") + FString::Join(Others, TEXT(", "))));
+		}
+		else if (UEditorAssetLibrary::DeleteAsset(Path))
+		{
+			Deleted.Add(MakeShared<FJsonValueString>(Path));
+		}
+		else
+		{
+			Blocked.Add(MakeShared<FJsonValueString>(Path + TEXT(" (delete failed)")));
+		}
+	}
+
+	TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+	ResultObj->SetBoolField(TEXT("success"), true);
+	ResultObj->SetArrayField(TEXT("deleted"), Deleted);
+	if (Blocked.Num() > 0)
+	{
+		ResultObj->SetArrayField(TEXT("not_deleted"), Blocked);
+	}
+	return ResultObj;
 }

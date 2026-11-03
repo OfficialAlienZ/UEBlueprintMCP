@@ -1,6 +1,8 @@
 // Copyright (c) 2025 zolnoor. All rights reserved.
 
 #include "Actions/MaterialActions.h"
+#include "MaterialShared.h"
+#include "RHIGlobals.h"
 #include "MCPContext.h"
 
 // Material system headers
@@ -237,6 +239,16 @@ static void InitExpressionClassMap()
 
 UMaterial* FMaterialAction::FindMaterial(const FString& MaterialName, FString& OutError) const
 {
+	if (MaterialName.StartsWith(TEXT("/")))
+	{
+		if (UMaterial* ByPath = LoadObject<UMaterial>(nullptr, *MaterialName))
+		{
+			return ByPath;
+		}
+		OutError = FString::Printf(TEXT("Material '%s' not found"), *MaterialName);
+		return nullptr;
+	}
+
 	FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
 	IAssetRegistry& AssetRegistry = AssetRegistryModule.Get();
 
@@ -324,6 +336,36 @@ void FMaterialAction::MarkMaterialModified(UMaterial* Material, FMCPEditorContex
 		Material->MarkPackageDirty();
 		Context.MarkPackageDirty(Material->GetOutermost());
 	}
+}
+
+UMaterialExpression* FMaterialAction::FindExpression(UMaterial* Material, const FString& NodeName, const FMCPEditorContext& Context) const
+{
+	UMaterialExpression* Expr = Context.GetMaterialNode(NodeName);
+	if (Expr && Expr->GetOuter() == Material)
+	{
+		return Expr;
+	}
+	if (!Material)
+	{
+		return nullptr;
+	}
+	// Existing nodes: object name first, then parameter name, then comment (Desc)
+	for (int32 Pass = 0; Pass < 3; ++Pass)
+	{
+		for (UMaterialExpression* Candidate : Material->GetExpressions())
+		{
+			if (!Candidate) continue;
+			const bool bMatch =
+				Pass == 0 ? Candidate->GetName().Equals(NodeName, ESearchCase::IgnoreCase) :
+				Pass == 1 ? Candidate->GetParameterName().ToString().Equals(NodeName, ESearchCase::IgnoreCase) :
+				            Candidate->Desc.Equals(NodeName, ESearchCase::IgnoreCase);
+			if (bMatch)
+			{
+				return Candidate;
+			}
+		}
+	}
+	return nullptr;
 }
 
 // =========================================================================
@@ -509,7 +551,7 @@ void FAddMaterialExpressionAction::SetExpressionProperties(UMaterialExpression* 
 
 	for (const auto& Pair : Properties->Values)
 	{
-		const FString& PropName = Pair.Key;
+		const FString PropName(Pair.Key);
 		const TSharedPtr<FJsonValue>& PropValue = Pair.Value;
 
 		// Handle specific expression types and their properties
@@ -644,7 +686,7 @@ TSharedPtr<FJsonObject> FAddMaterialExpressionAction::ExecuteInternal(const TSha
 	GetRequiredString(Params, TEXT("node_name"), NodeName, Error);
 
 	// Check for duplicate name
-	if (Context.GetMaterialNode(NodeName))
+	if (FindExpression(Material, NodeName, Context))
 	{
 		return CreateErrorResponse(
 			FString::Printf(TEXT("Node name '%s' already exists. Use a unique name."), *NodeName),
@@ -682,8 +724,9 @@ TSharedPtr<FJsonObject> FAddMaterialExpressionAction::ExecuteInternal(const TSha
 	}
 
 	// Register in context
-	Context.RegisterMaterialNode(NodeName, NewExpr);
+	// Set the material first: switching materials clears the node map
 	Context.SetCurrentMaterial(Material);
+	Context.RegisterMaterialNode(NodeName, NewExpr);
 
 	// Mark modified
 	MarkMaterialModified(Material, Context);
@@ -889,6 +932,17 @@ bool FConnectMaterialExpressionsAction::ConnectToExpressionInput(UMaterialExpres
 		return true;
 	}
 
+	// Any other expression: match the input by its pin name
+	for (int32 i = 0; FExpressionInput* Input = TargetExpr->GetInput(i); ++i)
+	{
+		if (TargetExpr->GetInputName(i).ToString().Equals(InputName, ESearchCase::IgnoreCase))
+		{
+			Input->Expression = SourceExpr;
+			Input->OutputIndex = OutputIndex;
+			return true;
+		}
+	}
+
 	OutError = FString::Printf(TEXT("Unknown input '%s' for expression type '%s'"), *InputName, *TargetExpr->GetClass()->GetName());
 	return false;
 }
@@ -913,20 +967,20 @@ TSharedPtr<FJsonObject> FConnectMaterialExpressionsAction::ExecuteInternal(const
 	int32 SourceOutputIndex = GetOptionalNumber(Params, TEXT("source_output_index"), 0);
 
 	// Find source node
-	UMaterialExpression* SourceExpr = Context.GetMaterialNode(SourceNodeName);
+	UMaterialExpression* SourceExpr = FindExpression(Material, SourceNodeName, Context);
 	if (!SourceExpr)
 	{
 		return CreateErrorResponse(
-			FString::Printf(TEXT("Source node '%s' not found. Make sure to use add_material_expression first."), *SourceNodeName),
+			FString::Printf(TEXT("Source node '%s' not found (node_name, object name, ParameterName or Desc)."), *SourceNodeName),
 			TEXT("source_not_found"));
 	}
 
 	// Find target node
-	UMaterialExpression* TargetExpr = Context.GetMaterialNode(TargetNodeName);
+	UMaterialExpression* TargetExpr = FindExpression(Material, TargetNodeName, Context);
 	if (!TargetExpr)
 	{
 		return CreateErrorResponse(
-			FString::Printf(TEXT("Target node '%s' not found. Make sure to use add_material_expression first."), *TargetNodeName),
+			FString::Printf(TEXT("Target node '%s' not found (node_name, object name, ParameterName or Desc)."), *TargetNodeName),
 			TEXT("target_not_found"));
 	}
 
@@ -1065,7 +1119,7 @@ TSharedPtr<FJsonObject> FConnectToMaterialOutputAction::ExecuteInternal(const TS
 	int32 SourceOutputIndex = GetOptionalNumber(Params, TEXT("source_output_index"), 0);
 
 	// Find source node
-	UMaterialExpression* SourceExpr = Context.GetMaterialNode(SourceNodeName);
+	UMaterialExpression* SourceExpr = FindExpression(Material, SourceNodeName, Context);
 	if (!SourceExpr)
 	{
 		return CreateErrorResponse(
@@ -1167,7 +1221,7 @@ TSharedPtr<FJsonObject> FSetMaterialExpressionPropertyAction::ExecuteInternal(co
 	GetRequiredString(Params, TEXT("property_value"), PropertyValue, Error);
 
 	// Find node
-	UMaterialExpression* Expr = Context.GetMaterialNode(NodeName);
+	UMaterialExpression* Expr = FindExpression(Material, NodeName, Context);
 	if (!Expr)
 	{
 		return CreateErrorResponse(
@@ -1219,13 +1273,20 @@ TSharedPtr<FJsonObject> FCompileMaterialAction::ExecuteInternal(const TSharedPtr
 	Material->PreEditChange(nullptr);
 	Material->PostEditChange();
 
-	// Get compilation result
-	bool bSuccess = true;
-	int32 ErrorCount = 0;
-	int32 WarningCount = 0;
-
 	// Force recompile for rendering (async shader compilation)
 	Material->ForceRecompileForRendering();
+
+	// Wait for this platform's shaders and read the real errors (e.g. a node without its texture), which the
+	// editor otherwise only logs ("Failed to compile Material ... Default Material will be used in game")
+	TArray<FString> Errors;
+	if (FMaterialResource* Resource = Material->GetMaterialResource(GMaxRHIShaderPlatform))
+	{
+		Resource->FinishCompilation();
+		Errors = Resource->GetCompileErrors();
+	}
+	const bool bSuccess = Errors.Num() == 0;
+	const int32 ErrorCount = Errors.Num();
+	const int32 WarningCount = 0;
 
 	// Reregister all components using this material
 	FGlobalComponentReregisterContext RecreateComponents;
@@ -1237,9 +1298,13 @@ TSharedPtr<FJsonObject> FCompileMaterialAction::ExecuteInternal(const TSharedPtr
 	// Build response
 	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetStringField(TEXT("name"), MaterialName);
-	Result->SetBoolField(TEXT("success"), bSuccess);
 	Result->SetNumberField(TEXT("error_count"), ErrorCount);
 	Result->SetNumberField(TEXT("warning_count"), WarningCount);
+	if (!bSuccess)
+	{
+		// The game would use the default material, so report it as a failure with the messages
+		return CreateErrorResponse(FString::Printf(TEXT("Material does not compile: %s"), *FString::Join(Errors, TEXT("; "))), TEXT("compile_failed"));
+	}
 
 	return CreateSuccessResponse(Result);
 }
@@ -1592,5 +1657,134 @@ TSharedPtr<FJsonObject> FCreatePostProcessVolumeAction::ExecuteInternal(const TS
 	Result->SetBoolField(TEXT("infinite_extent"), bInfiniteExtent);
 	Result->SetNumberField(TEXT("priority"), Priority);
 
+	return CreateSuccessResponse(Result);
+}
+
+// =========================================================================
+// FGetMaterialExpressionsAction / FDeleteMaterialExpressionAction
+// =========================================================================
+
+static FString MaterialPropertyShortName(EMaterialProperty Property)
+{
+	FString Name = StaticEnum<EMaterialProperty>()->GetNameStringByValue(Property);
+	Name.RemoveFromStart(TEXT("MP_"));
+	return Name;
+}
+
+bool FGetMaterialExpressionsAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	FString MaterialName;
+	return GetRequiredString(Params, TEXT("material_name"), MaterialName, OutError);
+}
+
+TSharedPtr<FJsonObject> FGetMaterialExpressionsAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	FString Error;
+	UMaterial* Material = GetMaterialByNameOrCurrent(Params, Context, Error);
+	if (!Material)
+	{
+		return CreateErrorResponse(Error, TEXT("material_not_found"));
+	}
+	Context.SetCurrentMaterial(Material);
+
+	TArray<TSharedPtr<FJsonValue>> Nodes;
+	for (UMaterialExpression* Expr : Material->GetExpressions())
+	{
+		if (!Expr) continue;
+		TSharedPtr<FJsonObject> Node = MakeShared<FJsonObject>();
+		Node->SetStringField(TEXT("name"), Expr->GetName());
+		Node->SetStringField(TEXT("class"), Expr->GetClass()->GetName().Replace(TEXT("MaterialExpression"), TEXT("")));
+		if (!Expr->GetParameterName().IsNone()) Node->SetStringField(TEXT("parameter"), Expr->GetParameterName().ToString());
+		if (!Expr->Desc.IsEmpty()) Node->SetStringField(TEXT("desc"), Expr->Desc);
+		Node->SetStringField(TEXT("pos"), FString::Printf(TEXT("%d,%d"), Expr->MaterialExpressionEditorX, Expr->MaterialExpressionEditorY));
+		TArray<FString> Links;
+		for (int32 i = 0; FExpressionInput* Input = Expr->GetInput(i); ++i)
+		{
+			if (Input->Expression)
+			{
+				Links.Add(FString::Printf(TEXT("%s<%s.%d"), *Expr->GetInputName(i).ToString(), *Input->Expression->GetName(), Input->OutputIndex));
+			}
+		}
+		if (Links.Num() > 0) Node->SetStringField(TEXT("inputs"), FString::Join(Links, TEXT(", ")));
+		Nodes.Add(MakeShared<FJsonValueObject>(Node));
+	}
+
+	TArray<FString> Outputs;
+	for (int32 P = 0; P < MP_MAX; ++P)
+	{
+		const EMaterialProperty Property = (EMaterialProperty)P;
+		FExpressionInput* Input = Material->GetExpressionInputForProperty(Property);
+		if (Input && Input->Expression)
+		{
+			Outputs.Add(FString::Printf(TEXT("%s<%s.%d"), *MaterialPropertyShortName(Property), *Input->Expression->GetName(), Input->OutputIndex));
+		}
+	}
+
+	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("material"), Material->GetPathName());
+	Result->SetArrayField(TEXT("expressions"), Nodes);
+	Result->SetStringField(TEXT("outputs"), FString::Join(Outputs, TEXT(", ")));
+	return CreateSuccessResponse(Result);
+}
+
+bool FDeleteMaterialExpressionAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	FString MaterialName, NodeName;
+	if (!GetRequiredString(Params, TEXT("material_name"), MaterialName, OutError)) return false;
+	return GetRequiredString(Params, TEXT("node_name"), NodeName, OutError);
+}
+
+TSharedPtr<FJsonObject> FDeleteMaterialExpressionAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	FString Error;
+	UMaterial* Material = GetMaterialByNameOrCurrent(Params, Context, Error);
+	if (!Material)
+	{
+		return CreateErrorResponse(Error, TEXT("material_not_found"));
+	}
+
+	FString NodeName;
+	GetRequiredString(Params, TEXT("node_name"), NodeName, Error);
+	UMaterialExpression* Expr = FindExpression(Material, NodeName, Context);
+	if (!Expr)
+	{
+		return CreateErrorResponse(FString::Printf(TEXT("Node '%s' not found"), *NodeName), TEXT("node_not_found"));
+	}
+	const FString DeletedName = Expr->GetName();
+
+	Material->Modify();
+	int32 ClearedLinks = 0;
+	for (UMaterialExpression* Other : Material->GetExpressions())
+	{
+		if (!Other || Other == Expr) continue;
+		for (int32 i = 0; FExpressionInput* Input = Other->GetInput(i); ++i)
+		{
+			if (Input->Expression == Expr)
+			{
+				Other->Modify();
+				Input->Expression = nullptr;
+				++ClearedLinks;
+			}
+		}
+	}
+	for (int32 P = 0; P < MP_MAX; ++P)
+	{
+		FExpressionInput* Input = Material->GetExpressionInputForProperty((EMaterialProperty)P);
+		if (Input && Input->Expression == Expr)
+		{
+			Input->Expression = nullptr;
+			++ClearedLinks;
+		}
+	}
+
+	Material->GetExpressionCollection().RemoveExpression(Expr);
+	Material->RemoveExpressionParameter(Expr);
+	Expr->MarkAsGarbage();
+	Context.SetCurrentMaterial(Material);
+	MarkMaterialModified(Material, Context);
+
+	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("deleted"), DeletedName);
+	Result->SetNumberField(TEXT("cleared_links"), ClearedLinks);
 	return CreateSuccessResponse(Result);
 }
