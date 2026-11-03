@@ -33,6 +33,9 @@ protected:
 
 	/** Mark material as modified and trigger recompilation */
 	void MarkMaterialModified(UMaterial* Material, FMCPEditorContext& Context) const;
+
+	/** Find an expression: node_name from add_material_expression, else object name, ParameterName or Desc in the material */
+	UMaterialExpression* FindExpression(UMaterial* Material, const FString& NodeName, const FMCPEditorContext& Context) const;
 };
 
 
@@ -323,4 +326,45 @@ protected:
 private:
 	/** Parse location from params */
 	FVector GetVectorFromParams(const TSharedPtr<FJsonObject>& Params, const FString& FieldName) const;
+};
+
+
+/**
+ * FGetMaterialExpressionsAction
+ *
+ * Lists a material's expressions (name, class, parameter, desc, position, linked inputs)
+ * and which expression feeds each main output.
+ *
+ * Parameters:
+ *   - material_name (required): Name or path of the Material
+ */
+class UEBLUEPRINTMCP_API FGetMaterialExpressionsAction : public FMaterialAction
+{
+public:
+	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
+
+protected:
+	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
+	virtual FString GetActionName() const override { return TEXT("get_material_expressions"); }
+	virtual bool RequiresSave() const override { return false; }
+};
+
+
+/**
+ * FDeleteMaterialExpressionAction
+ *
+ * Deletes an expression and clears every link to it (other expressions and main outputs).
+ *
+ * Parameters:
+ *   - material_name (required): Name or path of the Material
+ *   - node_name (required): node_name, object name, ParameterName or Desc of the expression
+ */
+class UEBLUEPRINTMCP_API FDeleteMaterialExpressionAction : public FMaterialAction
+{
+public:
+	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
+
+protected:
+	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
+	virtual FString GetActionName() const override { return TEXT("delete_material_expression"); }
 };

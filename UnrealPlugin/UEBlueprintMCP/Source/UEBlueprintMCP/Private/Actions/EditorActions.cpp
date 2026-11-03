@@ -18,6 +18,8 @@
 #include "Algo/Sort.h"
 #include "FileHelpers.h"
 #include "UObject/SavePackage.h"
+#include "AssetToolsModule.h"
+#include "Misc/PackageName.h"
 
 
 // Helper to find actor by name (stops at the first match)
@@ -783,5 +785,107 @@ TSharedPtr<FJsonObject> FSaveAllAction::ExecuteInternal(const TSharedPtr<FJsonOb
 	}
 	Result->SetArrayField(TEXT("saved_packages"), PackagesArray);
 
+	return CreateSuccessResponse(Result);
+}
+
+
+// =========================================================================
+// FSetAssetPropertyAction
+// =========================================================================
+
+bool FSetAssetPropertyAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	FString Value;
+	if (!GetRequiredString(Params, TEXT("object_path"), Value, OutError)) return false;
+	if (!GetRequiredString(Params, TEXT("property_name"), Value, OutError)) return false;
+	if (!Params->HasField(TEXT("property_value")))
+	{
+		OutError = TEXT("Missing 'property_value'");
+		return false;
+	}
+	return true;
+}
+
+TSharedPtr<FJsonObject> FSetAssetPropertyAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	const FString ObjectPath = Params->GetStringField(TEXT("object_path"));
+	const FString PropertyName = Params->GetStringField(TEXT("property_name"));
+
+	UObject* Object = LoadObject<UObject>(nullptr, *ObjectPath);
+	if (!Object)
+	{
+		return CreateErrorResponse(FString::Printf(TEXT("Object not found: %s"), *ObjectPath), TEXT("not_found"));
+	}
+	FProperty* Property = Object->GetClass()->FindPropertyByName(*PropertyName);
+	if (!Property)
+	{
+		return CreateErrorResponse(FString::Printf(TEXT("Property not found: %s"), *PropertyName), TEXT("not_found"));
+	}
+
+	// Structs take Unreal text with only the fields to change, e.g. NaniteSettings = (bEnabled=True)
+	Object->Modify();
+	Object->PreEditChange(Property);
+	FString Error;
+	if (!FMCPCommonUtils::SetObjectProperty(Object, PropertyName, Params->TryGetField(TEXT("property_value")), Error))
+	{
+		return CreateErrorResponse(Error, TEXT("property_set_failed"));
+	}
+	// Lets the asset react as if edited in its editor (e.g. a Static Mesh rebuilds its Nanite data)
+	FPropertyChangedEvent ChangedEvent(Property, EPropertyChangeType::ValueSet);
+	Object->PostEditChangeProperty(ChangedEvent);
+	Object->MarkPackageDirty();
+	Context.MarkPackageDirty(Object->GetOutermost());
+
+	FString NewValue;
+	Property->ExportTextItem_Direct(NewValue, Property->ContainerPtrToValuePtr<void>(Object), nullptr, Object, PPF_None);
+	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("object"), Object->GetPathName());
+	Result->SetStringField(TEXT("property"), PropertyName);
+	Result->SetStringField(TEXT("value"), NewValue);
+	return CreateSuccessResponse(Result);
+}
+
+
+// =========================================================================
+// FDuplicateAssetAction
+// =========================================================================
+
+bool FDuplicateAssetAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	FString Value;
+	if (!GetRequiredString(Params, TEXT("source_path"), Value, OutError)) return false;
+	return GetRequiredString(Params, TEXT("dest_path"), Value, OutError);
+}
+
+TSharedPtr<FJsonObject> FDuplicateAssetAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	const FString SourcePath = Params->GetStringField(TEXT("source_path"));
+	FString DestPath = Params->GetStringField(TEXT("dest_path"));
+	if (DestPath.Contains(TEXT(".")))
+	{
+		DestPath = FPackageName::ObjectPathToPackageName(DestPath);
+	}
+
+	UObject* Source = LoadObject<UObject>(nullptr, *SourcePath);
+	if (!Source)
+	{
+		return CreateErrorResponse(FString::Printf(TEXT("Asset not found: %s"), *SourcePath), TEXT("not_found"));
+	}
+	if (FPackageName::DoesPackageExist(DestPath) || FindPackage(nullptr, *DestPath))
+	{
+		return CreateErrorResponse(FString::Printf(TEXT("Asset already exists: %s"), *DestPath), TEXT("already_exists"));
+	}
+
+	IAssetTools& AssetTools = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools")).Get();
+	UObject* Copy = AssetTools.DuplicateAsset(FPackageName::GetShortName(DestPath), FPackageName::GetLongPackagePath(DestPath), Source);
+	if (!Copy)
+	{
+		return CreateErrorResponse(FString::Printf(TEXT("Could not duplicate %s to %s"), *SourcePath, *DestPath), TEXT("duplicate_failed"));
+	}
+	Context.MarkPackageDirty(Copy->GetOutermost());
+
+	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("path"), Copy->GetPathName());
+	Result->SetStringField(TEXT("class"), Copy->GetClass()->GetName());
 	return CreateSuccessResponse(Result);
 }

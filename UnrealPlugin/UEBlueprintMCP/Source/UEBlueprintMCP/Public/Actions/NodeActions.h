@@ -68,6 +68,29 @@ protected:
 };
 
 
+/** Convert a variable Get node to a Validated Get (object) / Branch (bool), or back to a pure Get */
+class UEBLUEPRINTMCP_API FSetVariableGetPurityAction : public FBlueprintNodeAction
+{
+public:
+	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
+protected:
+	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
+	virtual FString GetActionName() const override { return TEXT("convert_to_validated_get"); }
+};
+
+
+/** Get every node and connection of a graph in one compact call (read-only) */
+class UEBLUEPRINTMCP_API FGetGraphConnectionsAction : public FBlueprintNodeAction
+{
+public:
+	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
+protected:
+	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
+	virtual FString GetActionName() const override { return TEXT("get_graph_connections"); }
+	virtual bool RequiresSave() const override { return false; }
+};
+
+
 /** Set the position of a node in the graph */
 class UEBLUEPRINTMCP_API FSetNodePositionAction : public FBlueprintNodeAction
 {
@@ -176,6 +199,15 @@ protected:
 	virtual FString GetActionName() const override { return TEXT("set_node_pin_default"); }
 };
 
+/** Read or set a property of the node itself (e.g. bExecuteWhenPaused on an input key event); no value = read it */
+class UEBLUEPRINTMCP_API FSetNodePropertyAction : public FBlueprintNodeAction
+{
+public:
+	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
+protected:
+	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
+	virtual FString GetActionName() const override { return TEXT("set_node_property"); }
+};
 
 // ============================================================================
 // Function Nodes

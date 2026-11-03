@@ -7,6 +7,7 @@ import json
 from typing import Any
 from mcp.types import Tool, TextContent
 
+from .. import compact
 from ..connection import get_connection, CommandResult
 
 
@@ -15,8 +16,8 @@ def _send_command_sync(command_type: str, params: dict | None = None) -> list[Te
     conn = get_connection()
     if not conn.is_connected:
         conn.connect()
-    result = conn.send_command(command_type, params)
-    return [TextContent(type="text", text=json.dumps(result.to_dict(), indent=2))]
+    result = conn.send_command(command_type, compact.strip_local(params))
+    return [TextContent(type="text", text=compact.dumps(result.to_dict(), command_type, params))]
 
 
 async def _send_command(command_type: str, params: dict | None = None) -> list[TextContent]:
@@ -79,7 +80,7 @@ def get_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "material_name": {"type": "string", "description": "Name of the Material"},
-                    "source_node": {"type": "string", "description": "Name of the source expression"},
+                    "source_node": {"type": "string", "description": "Source node: node_name, object name, ParameterName or Desc"},
                     "source_output_index": {"type": "integer", "description": "Output pin index (default: 0)"},
                     "target_node": {"type": "string", "description": "Name of the target expression"},
                     "target_input": {"type": "string", "description": "Input pin name (A, B, Alpha, Input, etc.)"}
@@ -94,7 +95,7 @@ def get_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "material_name": {"type": "string", "description": "Name of the Material"},
-                    "source_node": {"type": "string", "description": "Name of the source expression"},
+                    "source_node": {"type": "string", "description": "Source node: node_name, object name, ParameterName or Desc"},
                     "source_output_index": {"type": "integer", "description": "Output pin index (default: 0)"},
                     "material_property": {
                         "type": "string",
@@ -192,6 +193,29 @@ def get_tools() -> list[Tool]:
                 "required": ["name"]
             }
         ),
+        Tool(
+            name="get_material_expressions",
+            description="List a material's nodes (name, class, parameter, desc, pos, linked inputs) and what feeds each output. Node names work in connect/set/delete.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "material_name": {"type": "string", "description": "Material name or /Game/... path"}
+                },
+                "required": ["material_name"]
+            }
+        ),
+        Tool(
+            name="delete_material_expression",
+            description="Delete a material node and clear all links to it.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "material_name": {"type": "string", "description": "Material name or /Game/... path"},
+                    "node_name": {"type": "string", "description": "node_name, object name, ParameterName or Desc"}
+                },
+                "required": ["material_name", "node_name"]
+            }
+        ),
     ]
 
 
@@ -204,6 +228,8 @@ TOOL_HANDLERS = {
     "set_material_expression_property": "set_material_expression_property",
     "set_material_property": "set_material_property",
     "compile_material": "compile_material",
+    "get_material_expressions": "get_material_expressions",
+    "delete_material_expression": "delete_material_expression",
     "create_material_instance": "create_material_instance",
     "create_post_process_volume": "create_post_process_volume",
 }

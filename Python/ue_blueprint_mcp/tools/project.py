@@ -7,6 +7,7 @@ import json
 from typing import Any
 from mcp.types import Tool, TextContent
 
+from .. import compact
 from ..connection import get_connection
 
 
@@ -15,8 +16,8 @@ def _send_command_sync(command_type: str, params: dict | None = None) -> list[Te
     conn = get_connection()
     if not conn.is_connected:
         conn.connect()
-    result = conn.send_command(command_type, params)
-    return [TextContent(type="text", text=json.dumps(result.to_dict(), indent=2))]
+    result = conn.send_command(command_type, compact.strip_local(params))
+    return [TextContent(type="text", text=compact.dumps(result.to_dict(), command_type, params))]
 
 
 async def _send_command(command_type: str, params: dict | None = None) -> list[TextContent]:

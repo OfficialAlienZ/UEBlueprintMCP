@@ -9,6 +9,7 @@ import time
 from typing import Any
 from mcp.types import Tool, TextContent, ImageContent
 
+from .. import compact
 from ..connection import get_connection, CommandResult
 
 
@@ -17,8 +18,8 @@ def _send_command_sync(command_type: str, params: dict | None = None) -> list[Te
     conn = get_connection()
     if not conn.is_connected:
         conn.connect()
-    result = conn.send_command(command_type, params)
-    return [TextContent(type="text", text=json.dumps(result.to_dict(), indent=2))]
+    result = conn.send_command(command_type, compact.strip_local(params))
+    return [TextContent(type="text", text=compact.dumps(result.to_dict(), command_type, params))]
 
 
 async def _send_command(command_type: str, params: dict | None = None) -> list[TextContent]:
@@ -171,13 +172,7 @@ def get_tools() -> list[Tool]:
         ),
         Tool(
             name="get_actor_properties",
-            description=(
-                "Get an actor's level placement: name, label, class (and Blueprint path), level, folder, tags, "
-                "transform, attachment, every component (class, creation method, attachment, relative transform, "
-                "properties changed from the archetype) and the actor properties overridden from the class defaults. "
-                "With include_all_properties (or property_names) also returns all_properties: every reflected "
-                "property as Export Text. Use name 'WorldSettings' for the level's World Settings (DefaultGameMode, ...)."
-            ),
+            description="Actor placement: class, level, folder, tags, transform, attachment, components (changed props) and overrides of class defaults. include_all_properties/property_names add all_properties as Export Text. 'WorldSettings' = the level's World Settings.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -246,6 +241,31 @@ def get_tools() -> list[Tool]:
 
         # Play-In-Editor and runtime feedback
         Tool(
+            name="set_asset_property",
+            description="Set a property on an asset by path (e.g. a Static Mesh, a Geometry Collection, a Material Instance), like editing it in its asset editor: the asset is notified (a Static Mesh rebuilds) and saved. Structs take Unreal text with only the fields to change, e.g. property_name 'NaniteSettings', value '(bEnabled=True)'.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "object_path": {"type": "string", "description": "Full object path, e.g. /Game/Meshes/SM_Chair.SM_Chair"},
+                    "property_name": {"type": "string", "description": "Top-level property name"},
+                    "property_value": {"description": "Value: bool/number/string, or Unreal text for structs, arrays and references"}
+                },
+                "required": ["object_path", "property_name", "property_value"]
+            }
+        ),
+        Tool(
+            name="duplicate_asset",
+            description="Duplicate an asset to a new path, e.g. an engine template Niagara system into /Game. Fails if the destination exists.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "source_path": {"type": "string", "description": "Source object path, e.g. /Niagara/DefaultAssets/Templates/Systems/RadialBurst.RadialBurst"},
+                    "dest_path": {"type": "string", "description": "New package path, e.g. /Game/FX/NS_Dust"}
+                },
+                "required": ["source_path", "dest_path"]
+            }
+        ),
+        Tool(
             name="start_pie",
             description=(
                 "Start a Play-In-Editor session. Returns immediately (state 'starting'); poll get_pie_status "
@@ -278,13 +298,7 @@ def get_tools() -> list[Tool]:
         ),
         Tool(
             name="get_output_log",
-            description=(
-                "Read captured Unreal Output Log lines (ring buffer of the last 5000 lines). Without since_id "
-                "returns the most recent matching lines; with since_id returns newer lines oldest-first. "
-                "Pass the returned next_id as since_id on the next call to read incrementally. "
-                "dropped=true means lines were lost between since_id and the buffer start; "
-                "truncated=true means more matches exist than limit."
-            ),
+            description="Read Output Log lines (last 5000). Pass next_id as since_id to read incrementally (oldest-first). dropped/truncated flag lost or extra lines.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -294,7 +308,8 @@ def get_tools() -> list[Tool]:
                     "categories": {"type": "array", "items": {"type": "string"}, "description": "Only these log categories, e.g. [\"LogBlueprintUserMessages\", \"LogTemp\"]"},
                     "contains": {"type": "string", "description": "Case-insensitive substring filter on the message"},
                     "include_mcp": {"type": "boolean", "description": "Include this plugin's own 'UEBlueprintMCP:' lines (default false)"},
-                    "clear": {"type": "boolean", "description": "Clear the buffer after reading (default false)"}
+                    "clear": {"type": "boolean", "description": "Clear the buffer after reading (default false)"},
+                    "include_time": {"type": "boolean", "description": "Entries as objects with time (default: one line each, 'id V Category: message')"}
                 }
             }
         ),
@@ -336,16 +351,7 @@ def get_tools() -> list[Tool]:
         ),
         Tool(
             name="inject_input",
-            description=(
-                "Feed keyboard/mouse/gamepad input to the player controller of the running PIE game, as if a device "
-                "produced it (Input Action/Axis events and legacy bindings fire). Requires start_pie. Timed inputs run "
-                "in game time and return immediately, so check get_pie_status time_seconds (or sleep) to know when "
-                "they are done. Does not drive UMG widgets (menus/buttons) - call their functions or use "
-                "call_actor_function instead. Works while the PIE window is unfocused; if the editor is in the "
-                "background the game may be throttled (disable 'Use Less CPU when in Background' in Editor Preferences). "
-                "Examples: hold W for 2s = {key:'W', action:'press', duration:2}; jump = {key:'SpaceBar'}; "
-                "turn camera = {key:'MouseX', value:3, duration:0.5}; stick right = {key:'Gamepad_LeftX', action:'press', value:1}."
-            ),
+            description="Feed key/mouse/gamepad input to the PIE player (start_pie first); timed inputs run in game time and return at once. Not for UMG widgets. E.g. {key:'W', action:'press', duration:2}, {key:'SpaceBar'}, {key:'MouseX', value:3, duration:0.5}.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -359,16 +365,7 @@ def get_tools() -> list[Tool]:
         ),
         Tool(
             name="check_condition",
-            description=(
-                "Evaluate ONE condition against the running PIE game right now and return met true/false plus the "
-                "evaluated values (never blocks). Use it to assert expected behaviour, e.g. a property value after an "
-                "action. Types: game_time (seconds = absolute game time), actor_exists (actor_name), actor_property "
-                "(actor_name [+component_name], property_name, operator, value; dotted paths reach into structs/objects), "
-                "actor_distance (actor_name + target_actor_name or location [x,y,z]; value + operator, default <=), "
-                "log_contains (text, optional since_id/categories), pie_stopped. 'negate' inverts the result. Errors "
-                "when PIE is not running (except log_contains / pie_stopped) or when a property does not exist. A "
-                "missing actor is met=false with a reason. Use wait_for_condition to wait."
-            ),
+            description="Evaluate one condition on the running PIE game now; returns met + values. Types: game_time (seconds), actor_exists, actor_property (actor_name [+component_name], property_name dotted, operator, value), actor_distance (target_actor_name or location, value, default <=), log_contains (text), pie_stopped. negate inverts.",
             inputSchema={
                 "type": "object",
                 "properties": CONDITION_PROPERTIES,
@@ -377,15 +374,7 @@ def get_tools() -> list[Tool]:
         ),
         Tool(
             name="wait_for_condition",
-            description=(
-                "Poll a check_condition until it is met or the real-time timeout passes. Use it instead of sleeping "
-                "after inject_input / call_actor_function: e.g. wait until the enemy's Health <= 0, the player is "
-                "within 200cm of a goal, or the log shows a line. 'condition' has the check_condition parameters; for "
-                "game_time you can pass 'elapsed' (game seconds from now) instead of 'seconds'. 'abort_conditions' (a "
-                "list of conditions, e.g. the player dying or the log showing an error) end the wait early with "
-                "met=false and aborted_by. Returns the last check result plus waited_seconds, timed_out. Stops with an "
-                "error if PIE ends meanwhile."
-            ),
+            description="Poll a check_condition until met or timeout (instead of sleeping). game_time may use elapsed (seconds from now). abort_conditions end early with met=false, aborted_by. Returns last check + waited_seconds, timed_out.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -408,7 +397,8 @@ def get_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "target": {"type": "string", "enum": ["auto", "pie", "editor"], "description": "auto (default): PIE if running, else the editor viewport"},
-                    "max_width": {"type": "integer", "description": "Downscale to at most this width (default 960, 0 = full size)"},
+                    "max_width": {"type": "integer", "description": "Downscale to at most this width (default 480; images cost tokens by area, so keep it small, 0 = full size)"},
+                    "region": {"type": "array", "items": {"type": "number"}, "description": "Crop to [x0, y0, x1, y1] as fractions of the view (0..1) before downscaling, e.g. [0.3, 0, 0.7, 0.3] for the top middle"},
                     "label": {"type": "string", "description": "Text added to the file name (letters, digits, - and _)"}
                 }
             }
@@ -481,6 +471,8 @@ TOOL_HANDLERS = {
     "get_viewport_transform": "get_viewport_transform",
     "set_viewport_transform": "set_viewport_transform",
     "save_all": "save_all",
+    "set_asset_property": "set_asset_property",
+    "duplicate_asset": "duplicate_asset",
     "start_pie": "start_pie",
     "stop_pie": "stop_pie",
     "get_pie_status": "get_pie_status",
@@ -567,7 +559,7 @@ def _take_screenshot_sync(arguments: dict[str, Any]) -> list[TextContent | Image
             content.append(ImageContent(type="image", data=data, mimeType="image/png"))
         except OSError as e:
             result["image_error"] = f"Screenshot saved but could not be read by the MCP server: {e}"
-    return [TextContent(type="text", text=json.dumps(result, indent=2))] + content
+    return [TextContent(type="text", text=compact.dumps(result, "take_screenshot"))] + content
 
 
 async def handle_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | ImageContent]:
@@ -578,7 +570,7 @@ async def handle_tool(name: str, arguments: dict[str, Any]) -> list[TextContent 
 
     if name == "wait_for_condition":
         result = await asyncio.to_thread(_wait_for_condition_sync, arguments or {})
-        return [TextContent(type="text", text=json.dumps(result, indent=2))]
+        return [TextContent(type="text", text=compact.dumps(result, "wait_for_condition"))]
     if name == "take_screenshot":
         return await asyncio.to_thread(_take_screenshot_sync, arguments or {})
 

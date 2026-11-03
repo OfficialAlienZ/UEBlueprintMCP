@@ -289,3 +289,30 @@ protected:
 	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
 	virtual FString GetActionName() const override { return TEXT("create_colored_material"); }
 };
+
+/**
+ * Remove something from a Blueprint: a component (SCS), a variable (and its get/set nodes), a function graph, an input
+ * of a function, or a widget of a Widget Blueprint's designer tree. Compiles and saves.
+ */
+class UEBLUEPRINTMCP_API FRemoveFromBlueprintAction : public FEditorAction
+{
+public:
+	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
+
+protected:
+	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
+	virtual FString GetActionName() const override { return TEXT("remove_from_blueprint"); }
+};
+
+/**
+ * Delete assets by path. Refuses (listing them) when other assets still reference one, unless force is true.
+ */
+class UEBLUEPRINTMCP_API FDeleteAssetAction : public FEditorAction
+{
+public:
+	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
+
+protected:
+	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
+	virtual FString GetActionName() const override { return TEXT("delete_asset"); }
+};
