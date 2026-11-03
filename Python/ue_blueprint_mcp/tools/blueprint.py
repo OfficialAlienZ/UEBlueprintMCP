@@ -161,6 +161,30 @@ def get_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="set_data_table_row",
+            description=(
+                "Edit a Data Table row (counterpart of get_data_table_info): update some columns, add a row or "
+                "delete it. Only the columns listed in 'values' change. Column names are the authored names "
+                "returned by get_data_table_info. Text/String columns take a JSON string (Text gets a proper "
+                "localization key), numbers/bools their JSON type, enums an entry name or display name, "
+                "structs a (partial) nested object, arrays a JSON array that replaces the array. Values are "
+                "validated on a copy first, so a failing column leaves the row untouched. For a Composite Data "
+                "Table the row is edited in the parent table that stores it (reported as 'edited_table'); "
+                "new rows must target a parent table directly. Rejected while PIE runs."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "table_name": {"type": "string", "description": "Data Table name or full path (e.g. /Game/Data/CDT_SCPNItems)"},
+                    "row_name": {"type": "string", "description": "Row to edit"},
+                    "values": {"type": "object", "description": "Column name -> new value, e.g. {\"DisplayName\": \"Adrenaline Shot\"}"},
+                    "create_if_missing": {"type": "boolean", "description": "Add the row (default values + 'values') when it does not exist (default false)"},
+                    "delete_row": {"type": "boolean", "description": "Remove the row instead of editing it (default false)"}
+                },
+                "required": ["table_name", "row_name"]
+            }
+        ),
+        Tool(
             name="get_object_properties",
             description=(
                 "Read-only export of EVERY reflected property (UPROPERTY) of an object as Export Text, like the "
@@ -334,6 +358,7 @@ TOOL_HANDLERS = {
     "get_enum_info": "get_enum_info",
     "get_curve_info": "get_curve_info",
     "get_data_table_info": "get_data_table_info",
+    "set_data_table_row": "set_data_table_row",
     "get_object_properties": "get_object_properties",
     "get_project_config": "get_project_config",
     "set_blueprint_property": "set_blueprint_property",

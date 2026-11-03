@@ -80,7 +80,10 @@ TSharedPtr<FJsonObject> FCreateUMGWidgetBlueprintAction::ExecuteInternal(const T
 			PackagePath += TEXT("/");
 		}
 	}
-Duplicate an existing Widget Blueprint instead of creating an empty one
+	FString AssetName = BlueprintName;
+	FString FullPath = PackagePath + AssetName;
+
+	// Duplicate an existing Widget Blueprint instead of creating an empty one
 	FString DuplicateFrom;
 	if (Params->TryGetStringField(TEXT("duplicate_from"), DuplicateFrom) && !DuplicateFrom.IsEmpty())
 	{
@@ -112,10 +115,6 @@ Duplicate an existing Widget Blueprint instead of creating an empty one
 		DupResult->SetStringField(TEXT("duplicated_from"), SourceBlueprint->GetPathName());
 		return DupResult;
 	}
-
-	// 
-	FString AssetName = BlueprintName;
-	FString FullPath = PackagePath + AssetName;
 
 	// Aggressive cleanup: remove any existing widget blueprint
 	TArray<FString> PathsToCheck = {

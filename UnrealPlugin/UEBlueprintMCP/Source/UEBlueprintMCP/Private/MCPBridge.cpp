@@ -8,6 +8,7 @@
 #include "Actions/InspectionActions.h"
 #include "Actions/AIActions.h"
 #include "Actions/AssetInspectionActions.h"
+#include "Actions/DataTableActions.h"
 #include "Actions/SearchActions.h"
 #include "Actions/ObjectInspectionActions.h"
 #include "Actions/PIEActions.h"
@@ -104,6 +105,7 @@ void UMCPBridge::RegisterActions()
 	ActionHandlers.Add(TEXT("get_data_table_info"), MakeShared<FGetDataTableInfoAction>());
 	ActionHandlers.Add(TEXT("get_object_properties"), MakeShared<FGetObjectPropertiesAction>());
 	ActionHandlers.Add(TEXT("get_project_config"), MakeShared<FGetProjectConfigAction>());
+	ActionHandlers.Add(TEXT("set_data_table_row"), MakeShared<FSetDataTableRowAction>());
 
 	// =========================================================================
 	// Editor Actions (actors, viewport, save)
@@ -173,6 +175,7 @@ void UMCPBridge::RegisterActions()
 	ActionHandlers.Add(TEXT("add_blueprint_get_self_component_reference"), MakeShared<FAddBlueprintGetSelfComponentReferenceAction>());
 	ActionHandlers.Add(TEXT("add_blueprint_branch_node"), MakeShared<FAddBlueprintBranchNodeAction>());
 	ActionHandlers.Add(TEXT("add_blueprint_cast_node"), MakeShared<FAddBlueprintCastNodeAction>());
+	ActionHandlers.Add(TEXT("add_array_get_node"), MakeShared<FAddArrayGetNodeAction>());
 	ActionHandlers.Add(TEXT("add_blueprint_get_subsystem_node"), MakeShared<FAddBlueprintGetSubsystemNodeAction>());
 
 	// =========================================================================

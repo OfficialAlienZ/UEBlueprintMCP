@@ -31,6 +31,7 @@
 #endif
 #include "K2Node_GetSubsystem.h"
 #include "K2Node_MacroInstance.h"
+#include "K2Node_GetArrayItem.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "UObject/CoreNetTypes.h"
 #include "Kismet2/KismetEditorUtilities.h"
@@ -1274,6 +1275,33 @@ TSharedPtr<FJsonObject> FAddBlueprintBranchNodeAction::ExecuteInternal(const TSh
 
 	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
 	ResultData->SetStringField(TEXT("node_id"), BranchNode->NodeGuid.ToString());
+	return CreateSuccessResponse(ResultData);
+}
+
+
+bool FAddArrayGetNodeAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	return ValidateGraph(Params, Context, OutError);
+}
+
+TSharedPtr<FJsonObject> FAddArrayGetNodeAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	UBlueprint* Blueprint = GetTargetBlueprint(Params, Context);
+	UEdGraph* TargetGraph = GetTargetGraph(Params, Context);
+
+	// Wildcard pins; the element type is propagated when TargetArray is connected.
+	UK2Node_GetArrayItem* GetNode = FEdGraphSchemaAction_K2NewNode::SpawnNode<UK2Node_GetArrayItem>(
+		TargetGraph, GetNodePosition(Params), EK2NewNodeFlags::None
+	);
+
+	MarkBlueprintModified(Blueprint, Context);
+	RegisterCreatedNode(GetNode, Context);
+
+	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
+	ResultData->SetStringField(TEXT("node_id"), GetNode->NodeGuid.ToString());
+	ResultData->SetStringField(TEXT("array_pin"), TEXT("TargetArray"));
+	ResultData->SetStringField(TEXT("index_pin"), TEXT("Dimension"));
+	ResultData->SetStringField(TEXT("output_pin"), TEXT("Output"));
 	return CreateSuccessResponse(ResultData);
 }
 
