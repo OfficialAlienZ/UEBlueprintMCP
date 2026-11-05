@@ -21,6 +21,7 @@ A Model Context Protocol (MCP) server for AI-assisted Unreal Engine 4.27 / 5.x B
 | **Materials** | Create materials, add expressions, connect nodes, post-process |
 | **UMG Widgets** | Create widgets, add text/buttons, bind events |
 | **Editor** | Spawn actors, viewport control, save operations |
+| **Performance** | Profile (CSV, GPU, stats, memory), audit assets/levels, optimise textures/meshes/config/streaming, build lighting/navmesh/HLOD, profile packaged builds |
 
 ## Setup
 
@@ -84,6 +85,7 @@ All editor operations flow through `FEditorAction` subclasses that provide:
 
 - **[CLAUDE.md](CLAUDE.md)** - Architecture details and contribution guidelines
 - **[docs/SKILL.md](docs/SKILL.md)** - Full command reference for Claude Code
+- **[docs/OPTIMIZE.md](docs/OPTIMIZE.md)** - Performance workflow: measure, find the bottleneck, audit, fix, re-measure
 
 ## Requirements
 

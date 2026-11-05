@@ -15,7 +15,7 @@ from mcp.types import Tool, TextContent, ImageContent
 from .connection import get_connection, PersistentUnrealConnection, CommandResult
 
 # Import tool modules
-from .tools import blueprint, editor, nodes, project, umg, materials
+from .tools import blueprint, editor, nodes, project, umg, materials, docs, performance
 
 logger = logging.getLogger(__name__)
 
@@ -80,6 +80,8 @@ async def list_tools() -> list[Tool]:
     tools.extend(project.get_tools())
     tools.extend(umg.get_tools())
     tools.extend(materials.get_tools())
+    tools.extend(docs.get_tools())
+    tools.extend(performance.get_tools())
 
     return tools
 
@@ -114,6 +116,12 @@ async def call_tool(name: str, arguments: dict[str, Any]) -> list[TextContent | 
 
     if name in materials.TOOL_HANDLERS:
         return await materials.handle_tool(name, arguments)
+
+    if name in docs.TOOL_HANDLERS:
+        return await docs.handle_tool(name, arguments)
+
+    if name in performance.TOOL_HANDLERS:
+        return await performance.handle_tool(name, arguments)
 
     return [TextContent(type="text", text=f'{{"success": false, "error": "Unknown tool: {name}"}}')]
 

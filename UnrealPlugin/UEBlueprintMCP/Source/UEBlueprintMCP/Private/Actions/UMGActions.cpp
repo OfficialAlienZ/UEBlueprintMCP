@@ -24,8 +24,8 @@
 #include "K2Node_ComponentBoundEvent.h"
 #include "Kismet2/KismetEditorUtilities.h"
 
-// Helper to find widget blueprint in common paths
-static UWidgetBlueprint* FindWidgetBlueprintByName(const FString& BlueprintName)
+// Helper to find widget blueprint in common paths (declared in UMGActions.h)
+UWidgetBlueprint* FindWidgetBlueprintByName(const FString& BlueprintName)
 {
 	TArray<FString> SearchPaths = {
 		FString::Printf(TEXT("/Game/UI/%s"), *BlueprintName),
@@ -888,105 +888,5 @@ TSharedPtr<FJsonObject> FAddWidgetToViewportAction::ExecuteInternal(const TShare
 	ResultObj->SetStringField(TEXT("class_path"), WidgetClass->GetPathName());
 	ResultObj->SetNumberField(TEXT("z_order"), ZOrder);
 	ResultObj->SetStringField(TEXT("note"), TEXT("Widget class ready. Use CreateWidget and AddToViewport nodes in Blueprint."));
-	return ResultObj;
-}
-
-// =============================================================================
-// FSetTextBlockBindingAction
-// =============================================================================
-
-bool FSetTextBlockBindingAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
-{
-	if (!Params->HasField(TEXT("widget_name")))
-	{
-		OutError = TEXT("Missing 'widget_name' parameter");
-		return false;
-	}
-	if (!Params->HasField(TEXT("text_block_name")))
-	{
-		OutError = TEXT("Missing 'text_block_name' parameter");
-		return false;
-	}
-	if (!Params->HasField(TEXT("binding_property")))
-	{
-		OutError = TEXT("Missing 'binding_property' parameter");
-		return false;
-	}
-	return true;
-}
-
-TSharedPtr<FJsonObject> FSetTextBlockBindingAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
-{
-	FString BlueprintName = Params->GetStringField(TEXT("widget_name"));
-	FString WidgetName = Params->GetStringField(TEXT("text_block_name"));
-	FString BindingName = Params->GetStringField(TEXT("binding_property"));
-
-	UWidgetBlueprint* WidgetBlueprint = FindWidgetBlueprintByName(BlueprintName);
-	if (!WidgetBlueprint)
-	{
-		return FMCPCommonUtils::CreateErrorResponse(FString::Printf(
-			TEXT("Widget Blueprint '%s' not found"), *BlueprintName));
-	}
-
-	// Create variable for binding
-	FBlueprintEditorUtils::AddMemberVariable(
-		WidgetBlueprint,
-		FName(*BindingName),
-		FEdGraphPinType(UEdGraphSchema_K2::PC_Text, NAME_None, nullptr, EPinContainerType::None, false, FEdGraphTerminalType())
-	);
-
-	// Find the TextBlock widget
-	UTextBlock* TextBlock = Cast<UTextBlock>(WidgetBlueprint->WidgetTree->FindWidget(FName(*WidgetName)));
-	if (!TextBlock)
-	{
-		return FMCPCommonUtils::CreateErrorResponse(FString::Printf(
-			TEXT("TextBlock '%s' not found"), *WidgetName));
-	}
-
-	// Create binding function
-	const FString FunctionName = FString::Printf(TEXT("Get%s"), *BindingName);
-	UEdGraph* FuncGraph = FBlueprintEditorUtils::CreateNewGraph(
-		WidgetBlueprint,
-		FName(*FunctionName),
-		UEdGraph::StaticClass(),
-		UEdGraphSchema_K2::StaticClass()
-	);
-
-	if (FuncGraph)
-	{
-		FBlueprintEditorUtils::AddFunctionGraph<UClass>(WidgetBlueprint, FuncGraph, false, nullptr);
-
-		// Create entry node
-		UK2Node_FunctionEntry* EntryNode = NewObject<UK2Node_FunctionEntry>(FuncGraph);
-		FuncGraph->AddNode(EntryNode, false, false);
-		EntryNode->NodePosX = 0;
-		EntryNode->NodePosY = 0;
-		EntryNode->FunctionReference.SetExternalMember(FName(*FunctionName), WidgetBlueprint->GeneratedClass);
-		EntryNode->AllocateDefaultPins();
-
-		// Create get variable node
-		UK2Node_VariableGet* GetVarNode = NewObject<UK2Node_VariableGet>(FuncGraph);
-		GetVarNode->VariableReference.SetSelfMember(FName(*BindingName));
-		FuncGraph->AddNode(GetVarNode, false, false);
-		GetVarNode->NodePosX = 200;
-		GetVarNode->NodePosY = 0;
-		GetVarNode->AllocateDefaultPins();
-
-		// Connect nodes
-		UEdGraphPin* EntryThenPin = EntryNode->FindPin(UEdGraphSchema_K2::PN_Then);
-		UEdGraphPin* GetVarOutPin = GetVarNode->FindPin(UEdGraphSchema_K2::PN_ReturnValue);
-		if (EntryThenPin && GetVarOutPin)
-		{
-			EntryThenPin->MakeLinkTo(GetVarOutPin);
-		}
-	}
-
-	// Compile
-	WidgetBlueprint->MarkPackageDirty();
-	FKismetEditorUtilities::CompileBlueprint(WidgetBlueprint);
-
-	TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
-	ResultObj->SetBoolField(TEXT("success"), true);
-	ResultObj->SetStringField(TEXT("binding_name"), BindingName);
 	return ResultObj;
 }

@@ -15,6 +15,9 @@ UEBlueprintMCP/
 │       └── tools/                   # Tool definitions by category
 │           ├── blueprint.py         # Blueprint creation, compilation
 │           ├── editor.py            # Actor manipulation, viewport, save
+│   │       ├── docs.py              # check_docs_freshness (doc vs asset timestamps, UTC)
+│   │       ├── performance.py       # Profiling / audit / optimization tools (composites over the engine profilers)
+│   │       ├── perf_analysis.py     # Pure helpers: CSV Profiler analysis, profilegpu parsing (unit-testable)
 │           ├── nodes.py             # Graph nodes (events, functions, variables)
 │           ├── project.py           # Enhanced Input assets
 │           ├── umg.py               # Widget Blueprints
@@ -36,7 +39,7 @@ UEBlueprintMCP/
 │       │       ├── EditorActions.h
 │       │       ├── InspectionActions.h  # Read-only introspection (get_blueprint_info)
 │       │       ├── AIActions.h          # Behavior Tree / Blackboard introspection
-│       │       ├── AssetInspectionActions.h # Enum / Curve / Data Table introspection
+│       │       ├── AssetInspectionActions.h # Enum / Curve / Data Table introspection, get_asset_timestamps (asset file mtime, UTC)
 │       │       ├── DataTableActions.h   # set_data_table_row (edit/add/delete Data Table rows)
 │       │       ├── SearchActions.h      # find_in_blueprints (global text search across Blueprint assets)
 │       │       ├── ObjectInspectionActions.h # get_object_properties (full UPROPERTY export), get_project_config (ini)
@@ -44,9 +47,11 @@ UEBlueprintMCP/
 │       │       ├── GameplayActions.h    # Runtime gameplay driving in PIE (call_actor_function, inject_input)
 │       │       ├── ObserveActions.h     # check_condition (one-shot PIE assertions), take_screenshot
 │       │       ├── AutomationActions.h  # list/run/get results of Automation Framework tests (async runner on a core ticker)
+│       │       ├── PerformanceActions.h # get_performance_stats, audit_assets, audit_level (read-only)
+│       │       ├── OptimizationActions.h # optimize_static_mesh, optimize_texture, set_project_config (Default*.ini), manage_level_streaming, build_level
 │       │       ├── NodeActions.h
 │       │       ├── ProjectActions.h
-│       │       ├── UMGActions.h
+│       │       ├── UMGActions.h         # Widget BPs (binding action implemented in UMGBindingActions.cpp)
 │       │       └── MaterialActions.h
 │       └── Private/
 │           ├── MCPBridge.cpp        # Action registration & dispatch
@@ -70,13 +75,19 @@ UEBlueprintMCP/
 │               ├── GameplayActions.cpp
 │               ├── ObserveActions.cpp
 │               ├── AutomationActions.cpp
+│               ├── PerformanceActions.cpp      # get_performance_stats, audit_assets
+│               ├── LevelAuditActions.cpp       # audit_level
+│               ├── OptimizationActions.cpp     # optimize_static_mesh, optimize_texture
+│               ├── ConfigAndLevelActions.cpp   # set_project_config, manage_level_streaming, build_level
 │               ├── NodeActions.cpp
 │               ├── ProjectActions.cpp
 │               ├── UMGActions.cpp
+│               ├── UMGBindingActions.cpp # set_text_block_binding (Designer property bindings)
 │               └── MaterialActions.cpp
 │
 └── docs/
     ├── SKILL.md                     # Claude Code skill file (reference doc)
+    ├── OPTIMIZE.md                  # Performance workflow (measure -> bottleneck -> audit -> fix -> re-measure)
     └── PLAYTEST.md                  # Skill: autonomous play-testing and bug reporting
 ```
 
@@ -320,6 +331,13 @@ UE4 differences handled:
 - Enhanced Input is optional (`MCP_WITH_ENHANCED_INPUT`, set in `UEBlueprintMCP.Build.cs`). It is OFF by default on 4.27 and on only if the project's `.uproject` enables the `EnhancedInput` plugin; ON by default on UE 5.1+. Override with env var `UEBLUEPRINTMCP_ENHANCED_INPUT=0|1`. Enhanced Input commands (`create_input_action`, `create_input_mapping_context`, `add_key_mapping_to_context`, `add_enhanced_input_action_node`) are only registered when enabled; legacy input commands always work. The plugin is not declared in the `.uplugin`.
 - `.uplugin` uses no platform allow list (`WhitelistPlatforms` in 4.27 vs `PlatformAllowList` in 5.x)
 - `APlayerController::InputKey` takes `FInputKeyParams` from UE 5.1 (`MCP_INPUT_KEY_PARAMS`); use `MCPCompat::InjectKeyEvent` / `InjectKeyAxis`. The UE5 branch is not compiled on a 4.27-only machine.
+
+### Performance tools
+
+- Python `tools/performance.py` orchestrates the engine profilers over `execute_console_command` / `get_output_log` (csvprofile, profilegpu, stat dump*, memreport, Trace.*) and parses results in `tools/perf_analysis.py` (pure, testable). `package_project` / `profile_packaged_build` spawn background subprocesses (job state is per MCP session). `analyze_trace` runs `UnrealInsights -NoUI -AutoQuit -ExecOnAnalysisCompleteCmd=@=<rsp>` (`TimingInsights.ExportThreads/Timers/TimingEvents`, UE 5.1+ only) and streams the CSVs through `perf_analysis.analyze_trace_exports`; it errors cleanly when no binary exists or the engine is older than 5.1 (4.27 ships `UnrealInsights.app` in `Binaries/Mac`, but it has no `TimingInsights.Export*`; verified by scanning the binaries). Untested against a real 5.1+ Insights binary.
+- Heavy commands (`audit_assets`, `optimize_*`, `build_level`) are in the long-running list in `MCPServer.cpp` and `connection.py` (keep in sync).
+- 4.27 specifics: `UEditorStaticMeshLibrary` (EditorScriptingUtilities) drives LOD/collision, gated by `MCP_STATICMESH_LIBRARY` (UE4 only; UE5 returns an error). `RHI` module is a private dependency (texture pool stats). `StaticEnum<ECollisionTraceFlag>()` is not exported: map by hand. `GAverageMS/FPS` are declared only inside a function in `UnrealEngine.h`: redeclare `extern ENGINE_API`. Use `UStaticMesh::GetRenderData()` (direct member is deprecated).
+- Per-file helper prefixes (`Perf_`, `Lvl_`, `Opt_`, `Cfg_`) avoid anonymous-namespace clashes in unity builds; keep them when splitting files.
 
 ### PIE world targeting
 

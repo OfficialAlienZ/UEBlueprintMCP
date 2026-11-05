@@ -20,7 +20,10 @@ logger = logging.getLogger(__name__)
 # Commands that legitimately take long (compile, save). The plugin allows these 120s
 # on the game thread (see GetCommandTimeoutSeconds in MCPServer.cpp); the client waits
 # a few seconds longer so the plugin's own timeout error arrives first.
-LONG_RUNNING_COMMANDS = {"compile_blueprint", "compile_material", "save_all"}
+LONG_RUNNING_COMMANDS = {
+    "compile_blueprint", "compile_material", "save_all",
+    "audit_assets", "optimize_static_mesh", "optimize_texture", "build_level",
+}
 LONG_RUNNING_TIMEOUT = 125.0
 
 

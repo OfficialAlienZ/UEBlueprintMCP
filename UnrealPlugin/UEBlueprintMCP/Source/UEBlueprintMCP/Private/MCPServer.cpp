@@ -414,7 +414,11 @@ namespace
 		static const TSet<FString> LongRunning = {
 			TEXT("compile_blueprint"),
 			TEXT("compile_material"),
-			TEXT("save_all")
+			TEXT("save_all"),
+			TEXT("audit_assets"),
+			TEXT("optimize_static_mesh"),
+			TEXT("optimize_texture"),
+			TEXT("build_level")
 		};
 		return LongRunning.Contains(CommandType) ? 120.0 : 25.0;
 	}

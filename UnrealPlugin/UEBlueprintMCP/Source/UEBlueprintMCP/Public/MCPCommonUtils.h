@@ -98,7 +98,11 @@ public:
 	// Property Setting Utilities
 	// =========================================================================
 
-	/** Set a property on an object from a JSON value */
+	/**
+	 * Set a property on an object from a JSON value.
+	 * PropertyName may be a dotted path through nested structs and sub-objects
+	 * (e.g. "RenderTransform.Scale", "Font.Size", "Slot.Padding").
+	 */
 	static bool SetObjectProperty(UObject* Object, const FString& PropertyName,
 		const TSharedPtr<FJsonValue>& Value, FString& OutErrorMessage);
 

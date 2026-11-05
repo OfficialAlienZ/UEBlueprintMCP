@@ -38,6 +38,12 @@
 #include "EngineUtils.h"
 #include "Kismet/GameplayStatics.h"
 #include "EditorAssetLibrary.h"
+#include "JsonObjectConverter.h"
+#include "Serialization/JsonReader.h"
+#include "Serialization/JsonSerializer.h"
+#include "Styling/SlateColor.h"
+#include "Layout/Margin.h"
+#include "Misc/PackageName.h"
 
 // =========================================================================
 // JSON Parsing Utilities
@@ -636,14 +642,61 @@ bool FMCPCommonUtils::SetObjectProperty(UObject* Object, const FString& Property
 		return false;
 	}
 
-	FProperty* Property = Object->GetClass()->FindPropertyByName(*PropertyName);
-	if (!Property)
+	// PropertyName may be a dotted path into nested structs / sub-objects, e.g. "RenderTransform.Scale",
+	// "Font.Size", "Slot.LayoutData.Anchors.Minimum" or "Brush.ResourceObject".
+	TArray<FString> PathParts;
+	PropertyName.ParseIntoArray(PathParts, TEXT("."), true);
+	if (PathParts.Num() == 0)
 	{
-		OutErrorMessage = FString::Printf(TEXT("Property not found: %s"), *PropertyName);
+		OutErrorMessage = TEXT("Empty property name");
 		return false;
 	}
 
-	void* PropertyAddr = Property->ContainerPtrToValuePtr<void>(Object);
+	UStruct* CurrentStruct = Object->GetClass();
+	void* Container = Object;
+	UObject* OwnerObject = Object;
+	FProperty* Property = nullptr;
+	void* PropertyAddr = nullptr;
+	for (int32 PartIndex = 0; PartIndex < PathParts.Num(); ++PartIndex)
+	{
+		Property = CurrentStruct->FindPropertyByName(*PathParts[PartIndex]);
+		if (!Property)
+		{
+			OutErrorMessage = FString::Printf(TEXT("Property not found: %s (no '%s' on %s)"),
+				*PropertyName, *PathParts[PartIndex], *CurrentStruct->GetName());
+			return false;
+		}
+		PropertyAddr = Property->ContainerPtrToValuePtr<void>(Container);
+		if (PartIndex == PathParts.Num() - 1)
+		{
+			break;
+		}
+
+		if (FStructProperty* InnerStruct = CastField<FStructProperty>(Property))
+		{
+			CurrentStruct = InnerStruct->Struct;
+			Container = PropertyAddr;
+		}
+		else if (FObjectProperty* InnerObject = CastField<FObjectProperty>(Property))
+		{
+			UObject* SubObject = InnerObject->GetObjectPropertyValue(PropertyAddr);
+			if (!SubObject)
+			{
+				OutErrorMessage = FString::Printf(TEXT("Cannot set %s: '%s' is null"), *PropertyName, *PathParts[PartIndex]);
+				return false;
+			}
+			SubObject->Modify();
+			CurrentStruct = SubObject->GetClass();
+			Container = SubObject;
+			OwnerObject = SubObject;
+		}
+		else
+		{
+			OutErrorMessage = FString::Printf(TEXT("Cannot descend into '%s' (%s) in path %s: not a struct or object property"),
+				*PathParts[PartIndex], *Property->GetCPPType(), *PropertyName);
+			return false;
+		}
+	}
 
 	// Handle different property types
 	if (FBoolProperty* BoolProp = CastField<FBoolProperty>(Property))
@@ -653,7 +706,7 @@ bool FMCPCommonUtils::SetObjectProperty(UObject* Object, const FString& Property
 	}
 	else if (FIntProperty* IntProp = CastField<FIntProperty>(Property))
 	{
-		IntProp->SetPropertyValue_InContainer(Object, static_cast<int32>(Value->AsNumber()));
+		IntProp->SetPropertyValue(PropertyAddr, static_cast<int32>(Value->AsNumber()));
 		return true;
 	}
 	else if (FFloatProperty* FloatProp = CastField<FFloatProperty>(Property))
@@ -704,36 +757,94 @@ bool FMCPCommonUtils::SetObjectProperty(UObject* Object, const FString& Property
 	}
 	else if (FStructProperty* StructProp = CastField<FStructProperty>(Property))
 	{
-		if (StructProp->Struct == TBaseStructure<FVector>::Get())
+		// Clients that only send strings may pass JSON text such as "[1,0,0,1]" or "{\"R\":1}".
+		TSharedPtr<FJsonValue> StructValue = Value;
+		if (Value->Type == EJson::String)
 		{
-			if (Value->Type == EJson::Array)
+			const FString Trimmed = Value->AsString().TrimStartAndEnd();
+			if (Trimmed.StartsWith(TEXT("[")) || Trimmed.StartsWith(TEXT("{")))
 			{
-				TArray<TSharedPtr<FJsonValue>> Arr = Value->AsArray();
-				if (Arr.Num() >= 3)
+				TSharedPtr<FJsonValue> Parsed;
+				TSharedRef<TJsonReader<>> Reader = TJsonReaderFactory<>::Create(Trimmed);
+				if (FJsonSerializer::Deserialize(Reader, Parsed) && Parsed.IsValid())
 				{
-					FVector* VecPtr = (FVector*)PropertyAddr;
-					VecPtr->X = Arr[0]->AsNumber();
-					VecPtr->Y = Arr[1]->AsNumber();
-					VecPtr->Z = Arr[2]->AsNumber();
-					return true;
+					StructValue = Parsed;
 				}
 			}
 		}
-		else if (StructProp->Struct == TBaseStructure<FRotator>::Get())
+
+		if (StructValue->Type == EJson::Array)
 		{
-			if (Value->Type == EJson::Array)
+			const TArray<TSharedPtr<FJsonValue>>& Arr = StructValue->AsArray();
+			if (StructProp->Struct == TBaseStructure<FVector>::Get() && Arr.Num() >= 3)
 			{
-				TArray<TSharedPtr<FJsonValue>> Arr = Value->AsArray();
-				if (Arr.Num() >= 3)
+				FVector* VecPtr = (FVector*)PropertyAddr;
+				VecPtr->X = Arr[0]->AsNumber();
+				VecPtr->Y = Arr[1]->AsNumber();
+				VecPtr->Z = Arr[2]->AsNumber();
+				return true;
+			}
+			if (StructProp->Struct == TBaseStructure<FRotator>::Get() && Arr.Num() >= 3)
+			{
+				FRotator* RotPtr = (FRotator*)PropertyAddr;
+				RotPtr->Pitch = Arr[0]->AsNumber();
+				RotPtr->Yaw = Arr[1]->AsNumber();
+				RotPtr->Roll = Arr[2]->AsNumber();
+				return true;
+			}
+			if (StructProp->Struct == TBaseStructure<FVector2D>::Get() && Arr.Num() >= 2)
+			{
+				FVector2D* Vec2Ptr = (FVector2D*)PropertyAddr;
+				Vec2Ptr->X = Arr[0]->AsNumber();
+				Vec2Ptr->Y = Arr[1]->AsNumber();
+				return true;
+			}
+			// FMargin (Slot.Padding, Slot.LayoutData.Offsets, ...): [Left, Top, Right, Bottom]
+			if (StructProp->Struct == TBaseStructure<FMargin>::Get() && Arr.Num() >= 4)
+			{
+				*(FMargin*)PropertyAddr = FMargin((float)Arr[0]->AsNumber(), (float)Arr[1]->AsNumber(), (float)Arr[2]->AsNumber(), (float)Arr[3]->AsNumber());
+				return true;
+			}
+			// FLinearColor and FSlateColor (TextBlock ColorAndOpacity, ...): [R, G, B] or [R, G, B, A], 0..1
+			const bool bLinearColor = StructProp->Struct == TBaseStructure<FLinearColor>::Get();
+			const bool bSlateColor = StructProp->Struct->GetFName() == TEXT("SlateColor");
+			if ((bLinearColor || bSlateColor) && Arr.Num() >= 3)
+			{
+				const FLinearColor Color(
+					(float)Arr[0]->AsNumber(),
+					(float)Arr[1]->AsNumber(),
+					(float)Arr[2]->AsNumber(),
+					Arr.Num() >= 4 ? (float)Arr[3]->AsNumber() : 1.0f);
+				if (bLinearColor)
 				{
-					FRotator* RotPtr = (FRotator*)PropertyAddr;
-					RotPtr->Pitch = Arr[0]->AsNumber();
-					RotPtr->Yaw = Arr[1]->AsNumber();
-					RotPtr->Roll = Arr[2]->AsNumber();
-					return true;
+					*(FLinearColor*)PropertyAddr = Color;
 				}
+				else
+				{
+					*(FSlateColor*)PropertyAddr = FSlateColor(Color);
+				}
+				return true;
 			}
 		}
+		else if (StructValue->Type == EJson::Object)
+		{
+			if (FJsonObjectConverter::JsonObjectToUStruct(StructValue->AsObject().ToSharedRef(), StructProp->Struct, PropertyAddr, 0, 0))
+			{
+				return true;
+			}
+			OutErrorMessage = FString::Printf(TEXT("Could not convert JSON object to struct %s for: %s"), *StructProp->Struct->GetName(), *PropertyName);
+			return false;
+		}
+	}
+	else if (CastField<FTextProperty>(Property) && Value->Type == EJson::String)
+	{
+		*(FText*)PropertyAddr = FText::FromString(Value->AsString());
+		return true;
+	}
+	else if (CastField<FNameProperty>(Property) && Value->Type == EJson::String)
+	{
+		*(FName*)PropertyAddr = FName(*Value->AsString());
+		return true;
 	}
 	else if (FClassProperty* ClassProp = CastField<FClassProperty>(Property))
 	{
@@ -756,8 +867,54 @@ bool FMCPCommonUtils::SetObjectProperty(UObject* Object, const FString& Property
 		OutErrorMessage = FString::Printf(TEXT("Could not load class: %s"), *ClassPath);
 		return false;
 	}
+	else if (FObjectProperty* ObjectProp = CastField<FObjectProperty>(Property))
+	{
+		// Asset reference by path (e.g. Font.FontObject, Brush.ResourceObject); empty string clears it.
+		// Instanced sub-objects such as Slot are edited through dotted paths, not replaced.
+		if (Value->Type == EJson::String)
+		{
+			const FString AssetPath = Value->AsString().TrimStartAndEnd();
+			if (AssetPath.IsEmpty() || AssetPath.Equals(TEXT("None"), ESearchCase::IgnoreCase))
+			{
+				ObjectProp->SetObjectPropertyValue(PropertyAddr, nullptr);
+				return true;
+			}
 
-	OutErrorMessage = FString::Printf(TEXT("Unsupported property type for: %s"), *PropertyName);
+			UObject* Loaded = LoadObject<UObject>(nullptr, *AssetPath);
+			if (!Loaded && !AssetPath.Contains(TEXT(".")))
+			{
+				// "/Game/UI/T_Icon" -> "/Game/UI/T_Icon.T_Icon"
+				Loaded = LoadObject<UObject>(nullptr, *FString::Printf(TEXT("%s.%s"), *AssetPath, *FPackageName::GetShortName(AssetPath)));
+			}
+			if (!Loaded)
+			{
+				OutErrorMessage = FString::Printf(TEXT("Could not load asset for %s: %s"), *PropertyName, *AssetPath);
+				return false;
+			}
+			if (!Loaded->IsA(ObjectProp->PropertyClass))
+			{
+				OutErrorMessage = FString::Printf(TEXT("Asset %s is a %s, but %s expects %s"),
+					*AssetPath, *Loaded->GetClass()->GetName(), *PropertyName, *ObjectProp->PropertyClass->GetName());
+				return false;
+			}
+			ObjectProp->SetObjectPropertyValue(PropertyAddr, Loaded);
+			return true;
+		}
+	}
+
+	// Generic fallback: Unreal export text, e.g. "(R=1.0,G=0.0,B=0.0,A=1.0)" or
+	// "(SpecifiedColor=(R=1,G=0,B=0,A=1),ColorUseRule=UseColor_Specified)"
+	if (Value->Type == EJson::String)
+	{
+		if (MCPCompat::ImportPropertyText(Property, Value->AsString(), PropertyAddr, OwnerObject))
+		{
+			return true;
+		}
+		OutErrorMessage = FString::Printf(TEXT("Could not parse value for %s (%s) as export text."), *PropertyName, *Property->GetCPPType());
+		return false;
+	}
+
+	OutErrorMessage = FString::Printf(TEXT("Unsupported property type for: %s (%s)"), *PropertyName, *Property->GetCPPType());
 	return false;
 }
 

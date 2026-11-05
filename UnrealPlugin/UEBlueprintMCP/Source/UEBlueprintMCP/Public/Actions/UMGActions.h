@@ -5,6 +5,11 @@
 #include "CoreMinimal.h"
 #include "Actions/EditorAction.h"
 
+class UWidgetBlueprint;
+
+/** Resolve a Widget Blueprint by name or path (/Game/UI, /Game/Widgets, /Game, or a full /Game/... path). */
+UEBLUEPRINTMCP_API UWidgetBlueprint* FindWidgetBlueprintByName(const FString& BlueprintName);
+
 /**
  * Create a UMG Widget Blueprint
  */
@@ -110,7 +115,8 @@ protected:
 };
 
 /**
- * Set up text block binding to a variable
+ * Bind a widget property (Text, Visibility, ColorAndOpacity...) to a pure function using the Designer binding mechanism.
+ * Implemented in UMGBindingActions.cpp.
  */
 class UEBLUEPRINTMCP_API FSetTextBlockBindingAction : public FEditorAction
 {

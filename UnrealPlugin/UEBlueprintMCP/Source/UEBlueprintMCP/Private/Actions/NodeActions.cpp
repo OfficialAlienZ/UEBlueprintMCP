@@ -606,6 +606,17 @@ bool FAddBlueprintCustomEventAction::Validate(const TSharedPtr<FJsonObject>& Par
 {
 	FString EventName;
 	if (!GetRequiredString(Params, TEXT("event_name"), EventName, OutError)) return false;
+
+	const FString Replication = GetOptionalString(Params, TEXT("replication"));
+	if (!Replication.IsEmpty() &&
+		!Replication.Equals(TEXT("none"), ESearchCase::IgnoreCase) &&
+		!Replication.Equals(TEXT("server"), ESearchCase::IgnoreCase) &&
+		!Replication.Equals(TEXT("client"), ESearchCase::IgnoreCase) &&
+		!Replication.Equals(TEXT("multicast"), ESearchCase::IgnoreCase))
+	{
+		OutError = FString::Printf(TEXT("Invalid replication '%s'. Use none, server, client or multicast."), *Replication);
+		return false;
+	}
 	return ValidateGraph(Params, Context, OutError);
 }
 
@@ -617,11 +628,70 @@ TSharedPtr<FJsonObject> FAddBlueprintCustomEventAction::ExecuteInternal(const TS
 	UBlueprint* Blueprint = GetTargetBlueprint(Params, Context);
 	UEdGraph* EventGraph = GetTargetGraph(Params, Context);
 
+	const FString Replication = GetOptionalString(Params, TEXT("replication"));
+	const bool bHasReliable = Params->HasField(TEXT("reliable"));
+	const bool bReliable = GetOptionalBool(Params, TEXT("reliable"), false);
+
+	// Applies replication / reliable flags to a custom event (flags not given are left untouched)
+	auto ApplyReplication = [&](UK2Node_CustomEvent* Node)
+	{
+		if (!Replication.IsEmpty())
+		{
+			Node->FunctionFlags &= ~(FUNC_Net | FUNC_NetServer | FUNC_NetClient | FUNC_NetMulticast | FUNC_NetReliable);
+			if (Replication.Equals(TEXT("server"), ESearchCase::IgnoreCase))
+			{
+				Node->FunctionFlags |= (FUNC_Net | FUNC_NetServer);
+			}
+			else if (Replication.Equals(TEXT("client"), ESearchCase::IgnoreCase))
+			{
+				Node->FunctionFlags |= (FUNC_Net | FUNC_NetClient);
+			}
+			else if (Replication.Equals(TEXT("multicast"), ESearchCase::IgnoreCase))
+			{
+				Node->FunctionFlags |= (FUNC_Net | FUNC_NetMulticast);
+			}
+			// "none" leaves the event non-replicated (and drops reliable)
+			if (bReliable && !Replication.Equals(TEXT("none"), ESearchCase::IgnoreCase))
+			{
+				Node->FunctionFlags |= FUNC_NetReliable;
+			}
+		}
+		else if (bHasReliable && (Node->FunctionFlags & FUNC_Net))
+		{
+			if (bReliable) Node->FunctionFlags |= FUNC_NetReliable;
+			else Node->FunctionFlags &= ~FUNC_NetReliable;
+		}
+	};
+
+	// An event with this name already exists: update its replication flags instead of creating a duplicate
+	if (!Replication.IsEmpty() || bHasReliable)
+	{
+		for (UEdGraphNode* GraphNode : EventGraph->Nodes)
+		{
+			UK2Node_CustomEvent* Existing = Cast<UK2Node_CustomEvent>(GraphNode);
+			if (Existing && Existing->CustomFunctionName == FName(*EventName))
+			{
+				ApplyReplication(Existing);
+				FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
+				MarkBlueprintModified(Blueprint, Context);
+
+				TSharedPtr<FJsonObject> UpdatedData = MakeShared<FJsonObject>();
+				UpdatedData->SetStringField(TEXT("node_id"), Existing->NodeGuid.ToString());
+				UpdatedData->SetStringField(TEXT("event_name"), EventName);
+				UpdatedData->SetBoolField(TEXT("updated_existing"), true);
+				UpdatedData->SetBoolField(TEXT("replicated"), (Existing->FunctionFlags & FUNC_Net) != 0);
+				UpdatedData->SetBoolField(TEXT("reliable"), (Existing->FunctionFlags & FUNC_NetReliable) != 0);
+				return CreateSuccessResponse(UpdatedData);
+			}
+		}
+	}
+
 	// Create Custom Event node using editor's spawn API
 	UK2Node_CustomEvent* CustomEventNode = FEdGraphSchemaAction_K2NewNode::SpawnNode<UK2Node_CustomEvent>(
 		EventGraph, Position, EK2NewNodeFlags::None,
 		[&EventName](UK2Node_CustomEvent* Node) { Node->CustomFunctionName = FName(*EventName); }
 	);
+	ApplyReplication(CustomEventNode);
 
 	// Add parameters if provided
 	const TArray<TSharedPtr<FJsonValue>>* ParametersArray = GetOptionalArray(Params, TEXT("parameters"));
@@ -681,6 +751,8 @@ TSharedPtr<FJsonObject> FAddBlueprintCustomEventAction::ExecuteInternal(const TS
 	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
 	ResultData->SetStringField(TEXT("node_id"), CustomEventNode->NodeGuid.ToString());
 	ResultData->SetStringField(TEXT("event_name"), EventName);
+	ResultData->SetBoolField(TEXT("replicated"), (CustomEventNode->FunctionFlags & FUNC_Net) != 0);
+	ResultData->SetBoolField(TEXT("reliable"), (CustomEventNode->FunctionFlags & FUNC_NetReliable) != 0);
 	return CreateSuccessResponse(ResultData);
 }
 

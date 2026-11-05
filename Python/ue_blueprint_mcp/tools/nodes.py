@@ -45,7 +45,7 @@ def get_tools() -> list[Tool]:
         ),
         Tool(
             name="add_blueprint_custom_event",
-            description="Add a Custom Event node with optional parameters.",
+            description="Add a Custom Event node with optional parameters and replication flags. If an event with this name already exists in the graph and replication/reliable is given, its flags are updated instead of creating a duplicate.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -56,7 +56,10 @@ def get_tools() -> list[Tool]:
                         "type": "array",
                         "items": {"type": "object"},
                         "description": "Parameters with 'name' and 'type' keys (Float, Boolean, Integer, Vector, String)"
-                    }
+                    },
+                    "replication": {"type": "string", "enum": ["none", "server", "client", "multicast"], "description": "Replication mode: server = Run on Server, client = Run on owning Client, multicast = Multicast"},
+                    "reliable": {"type": "boolean", "description": "Reliable replication (only meaningful with replication server/client/multicast)"},
+                    "graph_name": {"type": "string", "description": "Graph to use (default: event graph)"}
                 },
                 "required": ["blueprint_name", "event_name"]
             }

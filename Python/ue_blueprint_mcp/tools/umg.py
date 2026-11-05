@@ -148,16 +148,23 @@ def get_tools() -> list[Tool]:
         ),
         Tool(
             name="set_text_block_binding",
-            description="Set up a property binding for a Text Block widget.",
+            description=(
+                "Bind a widget property to a function the way the Designer's 'Bind' dropdown does (no member variable "
+                "is created). Creates a pure function 'Get_<Widget>_<Property>' with the correct return type, registers "
+                "the binding and returns function_name plus entry_node_id/result_node_id so the body can be built with "
+                "the node commands (graph_name = function_name) and wired into the result node's ReturnValue pin. "
+                "Use this for values that change at runtime; for static values use set_component_property instead."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "widget_name": {"type": "string", "description": "Name of the Widget Blueprint"},
-                    "text_block_name": {"type": "string", "description": "Name of the Text Block"},
-                    "binding_property": {"type": "string", "description": "Property to bind to"},
-                    "binding_type": {"type": "string", "description": "Type of binding (Text, Visibility, etc.)"}
+                    "text_block_name": {"type": "string", "description": "Name of the widget to bind (any widget with a bindable property, not only Text Blocks)"},
+                    "binding_type": {"type": "string", "description": "Widget property to bind: Text (default), Visibility, ColorAndOpacity, IsEnabled, ToolTipText, Percent... Lists the bindable ones on error."},
+                    "function_name": {"type": "string", "description": "Optional. Existing function to bind (must match the signature), or the name for the new function. Default: Get_<Widget>_<Property>"},
+                    "remove": {"type": "boolean", "description": "Remove the binding for this widget property instead of adding one"}
                 },
-                "required": ["widget_name", "text_block_name", "binding_property"]
+                "required": ["widget_name", "text_block_name"]
             }
         ),
     ]

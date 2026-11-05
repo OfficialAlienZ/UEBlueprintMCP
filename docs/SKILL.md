@@ -27,6 +27,7 @@ This skill provides specialized knowledge for working with Unreal Engine Bluepri
 - `get_behavior_tree_info` - Behavior Tree (or Blackboard) introspection: Blackboard keys with types, root decorators, and the full node tree (class, name, static description, changed properties, services, ordered children). Decorators sit on the connection to a child and report `inverse_condition`, `flow_abort_mode` and `decorator_logic`. Blueprint-based nodes include a `blueprint` path for `get_blueprint_info`. Params: `asset_name` (name or path), `include_properties` (default true).
 - `get_enum_info` - Enum introspection (User Defined Enum asset or native enum): entries with `index`, `name`, `display_name`, `value`, `tooltip`, `hidden`. Params: `enum_name` (name or path).
 - `get_curve_info` - Curve asset introspection: CurveFloat (`curve`), CurveVector (`curves.x/y/z`), CurveLinearColor (`curves.r/g/b/a`) or CurveTable (`rows`). Keys carry time/value/interp (+ tangents for cubic), plus pre/post extrapolation. Params: `curve_name` (name or path).
+- `check_docs_freshness` - Detect Markdown docs older than the asset they describe (Python-side tool; asset times come from the plugin command `get_asset_timestamps`: .uasset/.umap mtime in UTC + `dirty` for unsaved editor edits). Compares absolute UTC instants, so timezones do not matter. Doc time = front matter `asset_modified` (asset mtime the doc was last verified against; survives git checkouts) else the doc file mtime. Front matter: `asset: /Game/...` and `asset_modified: <ISO 8601>`. Params: `items` (doc paths or `{doc, asset}`) and/or `scan_dir`, `docs_root` (default env `UEBLUEPRINTMCP_DOCS_ROOT`, else cwd), `tolerance_seconds` (default 2), `mark_synced` (after re-verifying a stale doc against the asset, stamps the front matter). Status: `fresh`, `stale` (re-check the asset, update the doc, then `mark_synced`), `doc_missing`, `asset_not_found`, `no_asset`. Run it before trusting a doc.
 - `get_data_table_info` - Data Table introspection: row struct, `columns` (authored name + type) and `rows` in table order (User Defined Struct fields use authored names, User Defined Enums use display names). Params: `table_name`, `include_rows` (default true; false returns only `row_names`), `row_names`, `offset`, `limit` (default 200).
 - `set_data_table_row` - Edit a Data Table row (write counterpart of `get_data_table_info`, same column names/value formats). Params: `table_name`, `row_name`, `values` (column -> value; only listed columns change; Text gets a localization key, enums accept name or display name, structs take partial nested objects, arrays replace), `create_if_missing` (default false), `delete_row` (default false). Validated on a copy first. Composite Data Tables: an existing row is edited in the parent table that stores it (`edited_table` in the response); new rows must target a parent table directly. Example: `{"table_name": "CDT_SCPNItems", "row_name": "Syringe", "values": {"DisplayName": "Adrenaline Shot"}}`.
 - `get_actor_properties` / `get_actors_in_level` / `find_actors_by_name` - level placement details: label, level, folder, tags, attachment, components (class, creation method, attachment, relative transform, changed properties) and actor overrides. `get_actor_properties` has `include_properties` (default true); the list commands take `include_details` (default false). `get_actor_properties` also takes `include_all_properties` / `property_names` / `editable_only` to return `all_properties`: every UPROPERTY as Export Text (e.g. `name="WorldSettings"` for `DefaultGameMode`).
@@ -53,9 +54,22 @@ This skill provides specialized knowledge for working with Unreal Engine Bluepri
 - `list_automation_tests` / `run_automation_tests` / `get_automation_results` - Unreal Automation Framework (Window > Test Automation): list tests (`filter`; `Project.Functional Tests.*` are AFunctionalTest actors placed in maps, no C++ needed), start a batch asynchronously (`tests` and/or `filter`, `timeout_seconds`, `cancel`; PIE must be stopped), poll results (state, passed/failed, per-test errors/warnings with message/context/file/line, `log_cursor` for `get_output_log`).
 - For autonomous play-testing and bug reporting, follow `docs/PLAYTEST.md`.
 
+### Performance & Optimization
+Follow `docs/OPTIMIZE.md` (measure -> classify bottleneck -> audit -> fix -> re-measure -> confirm in a packaged build). Never optimize before measuring.
+- `get_performance_stats` - fps, game/render/RHI/GPU thread ms and bottleneck, memory, RHI, cvars, project/saved/engine paths. Thread times can be 0 until `stat unit` ran once.
+- `capture_performance` - CSV Profiler capture of `seconds` (default 10) analysed into avg/p50/p95/p99/max for frame/game/render/RHI/GPU time, draw calls, top stats, worst hitches, `bottleneck` (game/render/gpu/frame_cap) and recommendations. `analyze_performance_csv` (`path`) analyses an existing CSV. Editor numbers are not packaged numbers.
+- `profile_gpu` (GPU pass hierarchy from `profilegpu`), `dump_cpu_stats` (`mode` average/frame/hitches, `root`; raw stat output), `capture_viewmode` (PIE only: `modes` such as shadercomplexity/quadoverdraw/lodcoloration as screenshots), `get_memory_report` (`memreport -full`, `sections` filter), `trace_control` (Trace.Start/Stop), `analyze_trace` (UE 5.1+ with UnrealInsights: headless `TimingInsights.Export*` to CSV, aggregated into per-thread busy time, top exclusive/inclusive timers and the slowest frames; args `trace`, `insights_path`, `threads`, `start_time`, `end_time`, `top_n`; unavailable on 4.27).
+- `audit_assets` - `asset_type` texture/static_mesh/skeletal_mesh/material/blueprint, `path`, `name_contains`, `limit`, `max_scan`: worst assets first with `issues`. `audit_level` (`world`, `instancing_threshold`): ticking actors, instancing candidates, movable meshes, lights/shadows, navmesh, streaming, issues.
+- `optimize_texture` (`texture`/`textures`, `max_texture_size`, `lod_group`, `compression`, `mip_gen`, `never_stream`, `srgb`, `lod_bias`) and `optimize_static_mesh` (`mesh`/`meshes`, `lods` [{percent_triangles}], `remove_lods`, `lod_group`, `collision`, `collision_complexity`, `lightmap_resolution`, `generate_lightmap_uvs`, `distance_field`, `min_lod`; UE 4.27 only): max 25 assets per call, blocked during PIE, return before/after.
+- `set_project_config` - persistent edit of `Config/Default<File>.ini` (`file`, `section`, `key`+`value` or `values`, `operation` set/add/remove, `apply_live`); keeps comments, writes `.mcpbak`. Read first with `get_project_config`.
+- `manage_level_streaming` (`action` list/add/remove/set, `level`, `streaming_class`, `should_be_loaded`, `should_be_visible`) and `build_level` (`what` lighting/navmesh/hlod/geometry/status, `quality`; lighting is async: poll `what=status`). Both reject edits while PIE runs.
+- `package_project` (`action` start/status/cancel; RunUAT BuildCookRun in the background, Development by default) and `profile_packaged_build` (`action` start/status/cancel; runs the packaged game with `-csvCaptureFrames` and returns the same analysis).
+- `compare_performance` (`before`, `after` CSV paths, `label_before`/`label_after`): deltas + verdict for before/after a fix or editor vs packaged. `profile_physics` (`roots`, `frames`): physics stat dumps + PhysicsSettings + checklist. `scan_project_cpp` (`names`, `patterns`, `source_dir`): heuristic scan of the project's C++ for costly patterns (Tick-like functions first) and symbol lookup; read-only, cannot edit or build code.
+- For autonomous play-testing and bug reporting, follow `docs/PLAYTEST.md`.
+
 ### Components
 - `add_component_to_blueprint` - Add StaticMeshComponent, BoxComponent, SphereComponent, SceneComponent, CameraComponent
-- `set_component_property` - Set properties on components. On Widget Blueprints `component_name` is a widget in the tree; `property_name=bIsVariable`, `property_value=true` ticks "Is Variable" (needed before a graph can reference the widget).
+- `set_component_property` - Set properties on components. On Widget Blueprints `component_name` is a widget in the tree; `property_name=bIsVariable`, `property_value=true` ticks "Is Variable" (needed before a graph can reference the widget). `property_name` may be a dotted path into nested structs and sub-objects (see "Widget styling: Designer first" below). Value formats: Text/Name as string; Vector/Rotator/Vector2D as `[x,y,(z)]`; FMargin as `[L,T,R,B]`; FLinearColor and FSlateColor (e.g. TextBlock `ColorAndOpacity`) as `[R,G,B,(A)]` 0..1 (a JSON string like `"[1,0,0,1]"` also works); asset references (`Font.FontObject`, `Brush.ResourceObject`) as an asset path, empty string clears; other structs as JSON object or Unreal export text, e.g. `"(R=1,G=0,B=0,A=1)"`.
 - `set_static_mesh_properties` - Set mesh, material, and overlay_material on StaticMeshComponent
 - `set_physics_properties` - Configure physics simulation
 
@@ -66,7 +80,7 @@ This skill provides specialized knowledge for working with Unreal Engine Bluepri
 
 ### Event Nodes
 - `add_blueprint_event_node` - Standard events (ReceiveBeginPlay, ReceiveTick)
-- `add_blueprint_custom_event` - Custom event with optional parameters [{name, type}]
+- `add_blueprint_custom_event` - Custom event with optional parameters [{name, type}] and replication: `replication` (`none`/`server`/`client`/`multicast`) + `reliable` (bool). If an event with that name already exists, only its flags are updated (e.g. `event_name: "SRV EventName"`, `replication: server`, `reliable: true`)
 - `add_blueprint_input_action_node` - Legacy input action events
 - `add_enhanced_input_action_node` - Enhanced Input events (Started/Triggered/Ongoing/Canceled/Completed pins + ActionValue)
 
@@ -309,7 +323,8 @@ FEditorAction (base)
 | `EditorActions.cpp` | Actor manipulation, viewport, save_all |
 | `NodeActions.cpp` | 40+ node types: events, variables, functions, dispatchers, spawn |
 | `ProjectActions.cpp` | Enhanced Input: actions, mapping contexts, key bindings |
-| `UMGActions.cpp` | Widget blueprints, text blocks, buttons, images, widget duplicate/remove, bindings |
+| `UMGActions.cpp` | Widget blueprints, text blocks, buttons, images, widget duplicate/remove |
+| `UMGBindingActions.cpp` | Designer property bindings (`set_text_block_binding`) |
 
 ## Extending the MCP (Adding New Commands)
 
@@ -451,6 +466,30 @@ RegisterCreatedNode(Node, Context)          // stores in Context.LastCreatedNode
 CreateSuccessResponse(ResultData)
 CreateErrorResponse(TEXT("Error message"))
 ```
+
+## UMG Widget Styling: Designer First
+
+Static widget values (text, colour, font, scale, translation, rotation, padding, anchors, visibility) belong in the Designer Details panel, not in graph nodes. Do NOT make a variable plus Set nodes in Construct/Pre Construct for them, and do not add "Is Variable" just to style a widget. Use `set_component_property` on the widget instead; it edits the same properties as the Details panel:
+
+| Details panel | `property_name` | `property_value` |
+|---|---|---|
+| TextBlock > Text | `Text` | `"Hello"` |
+| Color and Opacity | `ColorAndOpacity` | `[1,0.8,0,1]` |
+| Font size / font asset | `Font.Size` / `Font.FontObject` | `24` / `"/Game/UI/MyFont"` |
+| Justification | `Justification` | `"Center"` |
+| Render Transform > Scale / Translation / Angle / Shear | `RenderTransform.Scale` / `.Translation` / `.Angle` / `.Shear` | `[1.5,1.5]` / `[10,0]` / `15` / `[0,0]` |
+| Render Transform Pivot | `RenderTransformPivot` | `[0.5,0.5]` |
+| Visibility | `Visibility` | `"Collapsed"` |
+| Image > Brush image / size | `Brush.ResourceObject` / `Brush.ImageSize` | `"/Game/UI/T_Icon"` / `[64,64]` |
+| Slot padding (box/overlay/...) | `Slot.Padding` | `[8,4,8,4]` |
+| Slot alignment | `Slot.HorizontalAlignment` / `Slot.VerticalAlignment` | `"HAlign_Center"` / `"VAlign_Fill"` |
+| Canvas slot anchors | `Slot.LayoutData.Anchors.Minimum` / `.Maximum` | `[0.5,0.5]` |
+| Canvas slot offsets (Left,Top,Right,Bottom = X,Y,Width,Height when anchored to a point) | `Slot.LayoutData.Offsets` | `[0,0,200,50]` |
+| Canvas slot alignment (pivot) | `Slot.LayoutData.Alignment` | `[0.5,0.5]` |
+
+Dotted paths walk through struct members and sub-objects (the widget's `Slot`); a failing segment is reported in the error. Use `get_blueprint_info` with `include_widgets` to read the current values and names first.
+
+Dynamic values (change at runtime) use a Designer binding, not a variable plus per-frame Set nodes: `set_text_block_binding` (`widget_name`, `text_block_name` = any widget, `binding_type` = property such as `Text`, `Visibility`, `ColorAndOpacity`, optional `function_name`, `remove`) creates a pure `Get_<Widget>_<Property>` function with the right return type, registers the binding (Details panel > Bind) and returns `entry_node_id` / `result_node_id`; then build the body with the node commands using `graph_name` and wire it into `ReturnValue`. Reserve Construct/Event Graph nodes for logic that cannot be expressed as a static value or binding (creating widgets, reacting to events).
 
 ## UMG Widget Event Binding
 
