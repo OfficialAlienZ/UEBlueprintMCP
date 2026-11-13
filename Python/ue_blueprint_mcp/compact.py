@@ -24,7 +24,12 @@ _EMPTY_VALUES = ("", "()", "None", "False", "0", "0.0")
 _GUID = re.compile(r"(?<![0-9A-Fa-f])[0-9A-F]{32}(?![0-9A-Fa-f])")
 _ALIAS = re.compile(r"#(\d+)")
 _READ_PREFIXES = ("get_", "find_", "list_", "check_")  # batch keeps these results whole
-_LOCAL_OPTIONS = ("raw", "include_empty", "include_time", "full", "fields")
+_LOCAL_OPTIONS = ("raw", "include_empty", "include_time", "full", "fields", "around", "around_depth")
+# Direct write commands answer like batch sub-results: ids, names and counts only (full=true for everything)
+_WRITE_PREFIXES = ("add_", "set_", "connect_", "delete_", "remove_", "create_", "bind_", "duplicate_", "spawn_",
+                   "move_", "rename_", "convert_")
+# Listings default to a short page; pass limit for more
+_DEFAULT_LIMITS = {"get_output_log": 50, "get_actors_in_level": 50, "find_actors_by_name": 50, "get_data_table_info": 50}
 
 # Node GUIDs <-> short aliases, kept for the server's lifetime (GUIDs stay valid across calls)
 _guid_to_alias: dict[str, str] = {}
@@ -106,7 +111,7 @@ def _options(params: dict | None) -> dict:
             except ValueError:
                 parsed = [text]
             params[key] = [str(part) for part in parsed if str(part)]
-        else:
+        elif key not in ("around", "around_depth"):
             params[key] = text.lower() in ("true", "1", "yes")
     return params
 
@@ -170,10 +175,55 @@ def _shape_batch(params: dict, result: dict) -> dict:
     return result
 
 
+def _around(params: dict, result: dict) -> dict:
+    """Keep only the nodes within around_depth links (default 2) of the node given in around (#N / guid,
+    graph index or part of the title), with the links and defaults between them."""
+    nodes, links = result.get("nodes"), result.get("links") or []
+    if not isinstance(nodes, list):
+        return result
+    target = str(_unalias(str(params["around"]).strip()))
+    try:
+        depth = max(0, int(params.get("around_depth", 2)))
+    except (TypeError, ValueError):
+        depth = 2
+
+    def index(text: str) -> str:
+        return str(text).split(" ", 1)[0]
+
+    start = {index(n) for n in nodes if str(n).endswith("| " + target) or index(n) == target}
+    if not start:
+        start = {index(n) for n in nodes if target.lower() in str(n).rsplit(" | ", 1)[0].lower()}
+    if not start:
+        return {"success": False, "error": f"around: no node matches '{params['around']}'"}
+    edges = []
+    for link in links:
+        left, _, right = str(link).partition(">")
+        edges.append((left.split(".", 1)[0], right.split(".", 1)[0]))
+    kept, frontier = set(start), set(start)
+    for _ in range(depth):
+        reached = {b for a, b in edges if a in frontier} | {a for a, b in edges if b in frontier}
+        frontier = reached - kept
+        if not frontier:
+            break
+        kept |= frontier
+    shown = [n for n in nodes if index(n) in kept]
+    result["omitted_nodes"] = len(nodes) - len(shown)
+    result["nodes"] = shown
+    result["links"] = [link for link, (a, b) in zip(links, edges) if a in kept and b in kept]
+    result["defaults"] = [d for d in result.get("defaults") or [] if str(d).split(".", 1)[0] in kept]
+    result.pop("graphs", None)
+    return result
+
+
 def _shape(command: str, params: dict, result: dict) -> dict:
     result = _drop_echo(result, _unalias(params))
     if command == "batch":
         return _shape_batch(params, result)
+    if command == "get_graph_connections" and params.get("around") not in (None, "") and result.get("success") is not False:
+        return _around(params, result)
+    if command.startswith(_WRITE_PREFIXES) and not params.get("full") and result.get("success") is not False:
+        brief = _brief(result)
+        return brief if isinstance(brief, dict) else {"success": True}
     if command in ("get_actors_in_level", "find_actors_by_name"):
         actors = result.get("actors")
         if isinstance(actors, list) and all(isinstance(a, dict) and set(a) <= {"name", "class"} for a in actors):
@@ -214,6 +264,15 @@ def dumps(result: dict, command: str = "", params: dict | None = None) -> str:
     if shaped.get("success") is True and len(shaped) > 1:
         shaped.pop("success")  # no "error" key already means it worked
     return json.dumps(shaped, separators=(",", ":"))
+
+
+def prepare(command: str, params: dict | None) -> dict | None:
+    """Parameters as sent to Unreal: local options removed, short default page for listings."""
+    sent = strip_local(params) or {}
+    limit = _DEFAULT_LIMITS.get(command)
+    if limit and "limit" not in sent:
+        sent["limit"] = limit
+    return sent or None
 
 
 def strip_local(params: dict | None) -> dict | None:

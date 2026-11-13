@@ -16,7 +16,7 @@ def _send_command_sync(command_type: str, params: dict | None = None) -> list[Te
     conn = get_connection()
     if not conn.is_connected:
         conn.connect()
-    result = conn.send_command(command_type, compact.strip_local(params))
+    result = conn.send_command(command_type, compact.prepare(command_type, params))
     return [TextContent(type="text", text=compact.dumps(result.to_dict(), command_type, params))]
 
 
@@ -553,7 +553,9 @@ def get_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
-                    "graph_name": {"type": "string", "description": "Optional function graph name (defaults to event graph)"}
+                    "graph_name": {"type": "string", "description": "Optional function graph name (defaults to event graph)"},
+                    "around": {"type": "string", "description": "Only the nodes near this one: #N, graph index or part of its title"},
+                    "around_depth": {"type": "integer", "description": "Links to follow from around (default 2)"}
                 },
                 "required": ["blueprint_name"]
             }

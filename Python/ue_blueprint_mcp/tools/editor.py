@@ -18,7 +18,7 @@ def _send_command_sync(command_type: str, params: dict | None = None) -> list[Te
     conn = get_connection()
     if not conn.is_connected:
         conn.connect()
-    result = conn.send_command(command_type, compact.strip_local(params))
+    result = conn.send_command(command_type, compact.prepare(command_type, params))
     return [TextContent(type="text", text=compact.dumps(result.to_dict(), command_type, params))]
 
 
@@ -74,7 +74,7 @@ def get_tools() -> list[Tool]:
                 "properties": {
                     "world": WORLD_PROPERTY,
                     "class_filter": {"type": "string", "description": "Only actors of this class or a subclass (e.g. StaticMeshActor, PointLight, BP_Enemy)"},
-                    "limit": {"type": "integer", "description": "Max actors to return (default 100, max 1000)"},
+                    "limit": {"type": "integer", "description": "Max actors to return (default 50, max 1000)"},
                     "offset": {"type": "integer", "description": "Number of matching actors to skip (default 0)"},
                     "include_transform": {"type": "boolean", "description": "Include location/rotation/scale (default false)"},
                     "include_details": {"type": "boolean", "description": "Include level placement details per actor: label, level, folder, tags, attachment, components with relative transforms (default false)"},
@@ -91,7 +91,7 @@ def get_tools() -> list[Tool]:
                     "world": WORLD_PROPERTY,
                     "pattern": {"type": "string", "description": "Name pattern to search for"},
                     "class_filter": {"type": "string", "description": "Only actors of this class or a subclass"},
-                    "limit": {"type": "integer", "description": "Max actors to return (default 100, max 1000)"},
+                    "limit": {"type": "integer", "description": "Max actors to return (default 50, max 1000)"},
                     "offset": {"type": "integer", "description": "Number of matching actors to skip (default 0)"},
                     "include_transform": {"type": "boolean", "description": "Include location/rotation/scale (default false)"},
                     "include_details": {"type": "boolean", "description": "Include level placement details per actor: label, level, folder, tags, attachment, components with relative transforms (default false)"},
@@ -303,7 +303,7 @@ def get_tools() -> list[Tool]:
                 "type": "object",
                 "properties": {
                     "since_id": {"type": "integer", "description": "Only entries with id greater than this (use next_id from a previous call)"},
-                    "limit": {"type": "integer", "description": "Max entries to return (default 200, max 1000)"},
+                    "limit": {"type": "integer", "description": "Max entries to return (default 50, max 1000)"},
                     "min_verbosity": {"type": "string", "enum": ["Error", "Warning", "Display", "Log", "Verbose", "VeryVerbose"], "description": "Include this severity or worse (default Log)"},
                     "categories": {"type": "array", "items": {"type": "string"}, "description": "Only these log categories, e.g. [\"LogBlueprintUserMessages\", \"LogTemp\"]"},
                     "contains": {"type": "string", "description": "Case-insensitive substring filter on the message"},

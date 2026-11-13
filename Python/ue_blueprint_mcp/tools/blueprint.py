@@ -16,7 +16,7 @@ def _send_command_sync(command_type: str, params: dict | None = None) -> list[Te
     conn = get_connection()
     if not conn.is_connected:
         conn.connect()
-    result = conn.send_command(command_type, compact.strip_local(params))
+    result = conn.send_command(command_type, compact.prepare(command_type, params))
     return [TextContent(type="text", text=compact.dumps(result.to_dict(), command_type, params))]
 
 
@@ -156,7 +156,7 @@ def get_tools() -> list[Tool]:
                     "include_rows": {"type": "boolean", "description": "Include row values (default true). When false only row_names are returned"},
                     "row_names": {"type": "array", "items": {"type": "string"}, "description": "Only return these rows"},
                     "offset": {"type": "integer", "description": "Rows to skip (default 0)"},
-                    "limit": {"type": "integer", "description": "Max rows to return (default 200)"}
+                    "limit": {"type": "integer", "description": "Max rows to return (default 50)"}
                 },
                 "required": ["table_name"]
             }

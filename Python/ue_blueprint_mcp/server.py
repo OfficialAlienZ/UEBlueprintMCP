@@ -25,7 +25,9 @@ server = Server("ue-blueprint-mcp", instructions=(
     "Results are compact JSON: no 'success' key unless false, parameter echoes dropped, node GUIDs shown as #N "
     "(pass #N back anywhere a node id goes). Options on every tool: fields=['a','b.c'] returns only those paths; "
     "raw=true returns the untouched result. batch returns only ids/counts/errors of write commands (get_/find_ "
-    "results stay whole); full=true for everything. Read Blueprints with get_graph_connections."
+    "results stay whole), and so do direct add_/set_/connect_/delete_/create_ calls; full=true for everything. "
+    "Read Blueprints with get_graph_connections (around='#N' + around_depth for just one area). Listings "
+    "default to limit 50."
 ))
 
 
@@ -40,7 +42,7 @@ def _send_command_sync(command_type: str, params: dict | None = None) -> list[Te
     conn = get_connection()
     if not conn.is_connected:
         conn.connect()
-    result = conn.send_command(command_type, compact.strip_local(params))
+    result = conn.send_command(command_type, compact.prepare(command_type, params))
     return [TextContent(type="text", text=compact.dumps(result.to_dict(), command_type, params))]
 
 

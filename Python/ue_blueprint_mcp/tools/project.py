@@ -16,7 +16,7 @@ def _send_command_sync(command_type: str, params: dict | None = None) -> list[Te
     conn = get_connection()
     if not conn.is_connected:
         conn.connect()
-    result = conn.send_command(command_type, compact.strip_local(params))
+    result = conn.send_command(command_type, compact.prepare(command_type, params))
     return [TextContent(type="text", text=compact.dumps(result.to_dict(), command_type, params))]
 
 
