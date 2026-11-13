@@ -17,6 +17,7 @@
 #include "K2Node_VariableGet.h"
 #include "K2Node_VariableSet.h"
 #include "K2Node_IfThenElse.h"
+#include "AnimGraphNode_Slot.h"
 #include "K2Node_InputAction.h"
 #include "K2Node_Self.h"
 #include "K2Node_DynamicCast.h"
@@ -30,7 +31,15 @@
 #include "InputAction.h"
 #endif
 #include "K2Node_GetSubsystem.h"
+#include "Subsystems/GameInstanceSubsystem.h"
 #include "K2Node_MacroInstance.h"
+#include "K2Node_MakeStruct.h"
+#include "K2Node_BreakStruct.h"
+#include "K2Node_GetDataTableRow.h"
+#include "Engine/DataTable.h"
+#include "StructUtils/UserDefinedStruct.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "Misc/PackageName.h"
 #include "K2Node_GetArrayItem.h"
 #include "Kismet2/BlueprintEditorUtils.h"
 #include "UObject/CoreNetTypes.h"
@@ -251,7 +260,10 @@ TSharedPtr<FJsonObject> FFindBlueprintNodesAction::ExecuteInternal(const TShared
 {
 	FString NodeType = GetOptionalString(Params, TEXT("node_type"));
 	FString EventName = GetOptionalString(Params, TEXT("event_name"));
-	const bool bFullDetail = GetOptionalString(Params, TEXT("detail"), TEXT("basic")).Equals(TEXT("full"), ESearchCase::IgnoreCase);
+	const FString Detail = GetOptionalString(Params, TEXT("detail"), TEXT("basic"));
+	const bool bFullDetail = Detail.Equals(TEXT("full"), ESearchCase::IgnoreCase);
+	// compact: one "guid title" string per node (fewest tokens)
+	const bool bCompact = Detail.Equals(TEXT("compact"), ESearchCase::IgnoreCase);
 	const int32 Offset = FMath::Max(0, (int32)GetOptionalNumber(Params, TEXT("offset"), 0));
 	const int32 Limit = FMath::Max(0, (int32)GetOptionalNumber(Params, TEXT("limit"), 0));
 
@@ -331,7 +343,14 @@ TSharedPtr<FJsonObject> FFindBlueprintNodesAction::ExecuteInternal(const TShared
 			{
 				continue;
 			}
-			NodesArray.Add(MakeShared<FJsonValueObject>(FMCPCommonUtils::NodeToJson(Node, bFullDetail)));
+			if (bCompact)
+			{
+				NodesArray.Add(MakeShared<FJsonValueString>(Node->NodeGuid.ToString() + TEXT(" ") + Node->GetNodeTitle(ENodeTitleType::ListView).ToString()));
+			}
+			else
+			{
+				NodesArray.Add(MakeShared<FJsonValueObject>(FMCPCommonUtils::NodeToJson(Node, bFullDetail)));
+			}
 		}
 	}
 
@@ -435,6 +454,188 @@ TSharedPtr<FJsonObject> FGetNodePinsAction::ExecuteInternal(const TSharedPtr<FJs
 	ResultData->SetStringField(TEXT("node_class"), FoundNode->GetClass()->GetName());
 	ResultData->SetStringField(TEXT("node_title"), FoundNode->GetNodeTitle(ENodeTitleType::FullTitle).ToString());
 	ResultData->SetArrayField(TEXT("pins"), PinsArray);
+	return CreateSuccessResponse(ResultData);
+}
+
+
+bool FSetVariableGetPurityAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	FString NodeId;
+	if (!GetRequiredString(Params, TEXT("node_id"), NodeId, OutError)) return false;
+	return ValidateGraph(Params, Context, OutError);
+}
+
+TSharedPtr<FJsonObject> FSetVariableGetPurityAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	FString NodeId = Params->GetStringField(TEXT("node_id"));
+	bool bPure = false;
+	Params->TryGetBoolField(TEXT("pure"), bPure);
+
+	UBlueprint* Blueprint = GetTargetBlueprint(Params, Context);
+	UEdGraph* TargetGraph = GetTargetGraph(Params, Context);
+
+	UK2Node_VariableGet* GetNode = nullptr;
+	for (UEdGraphNode* Node : TargetGraph->Nodes)
+	{
+		if (Node && Node->NodeGuid.ToString() == NodeId)
+		{
+			GetNode = Cast<UK2Node_VariableGet>(Node);
+			break;
+		}
+	}
+	if (!GetNode)
+	{
+		return CreateErrorResponse(FString::Printf(TEXT("Variable Get node not found with ID: %s"), *NodeId));
+	}
+
+	// Same rule as the editor's context menu: objects/classes -> Validated Get, bool -> Branch
+	const UEdGraphPin* ValuePin = GetNode->GetValuePin();
+	const FEdGraphPinType PinType = ValuePin ? ValuePin->PinType : FEdGraphPinType();
+	FName Variation = TEXT("Pure");
+	if (!bPure && !PinType.IsContainer())
+	{
+		if (PinType.PinCategory == UEdGraphSchema_K2::PC_Boolean)
+		{
+			Variation = TEXT("Branch");
+		}
+		else if (PinType.PinCategory == UEdGraphSchema_K2::PC_Object || PinType.PinCategory == UEdGraphSchema_K2::PC_Class
+			|| PinType.PinCategory == UEdGraphSchema_K2::PC_SoftObject || PinType.PinCategory == UEdGraphSchema_K2::PC_SoftClass)
+		{
+			Variation = TEXT("ValidatedObject");
+		}
+	}
+	if (!bPure && Variation == TEXT("Pure"))
+	{
+		return CreateErrorResponse(TEXT("Only object, class or bool variables (not arrays) can be a Validated Get"));
+	}
+	if (!bPure && !GetDefault<UEdGraphSchema_K2>()->DoesGraphSupportImpureFunctions(TargetGraph))
+	{
+		return CreateErrorResponse(TEXT("This graph does not support impure nodes"));
+	}
+
+	// UK2Node_VariableGet::SetPurity is not exported, so set the CurrentVariation property and rebuild the pins
+	// (what TogglePurity does); links on the value pin are kept by ReconstructNode.
+	FEnumProperty* VariationProperty = FindFProperty<FEnumProperty>(UK2Node_VariableGet::StaticClass(), TEXT("CurrentVariation"));
+	if (!VariationProperty)
+	{
+		return CreateErrorResponse(TEXT("CurrentVariation property not found on UK2Node_VariableGet"));
+	}
+	const int64 Value = VariationProperty->GetEnum()->GetValueByName(Variation);
+	GetNode->Modify();
+	VariationProperty->GetUnderlyingProperty()->SetIntPropertyValue(VariationProperty->ContainerPtrToValuePtr<void>(GetNode), Value);
+	GetNode->ReconstructNode();
+	MarkBlueprintModified(Blueprint, Context);
+
+	TArray<TSharedPtr<FJsonValue>> PinsArray;
+	for (UEdGraphPin* Pin : GetNode->Pins)
+	{
+		if (Pin->PinType.PinCategory == UEdGraphSchema_K2::PC_Exec)
+		{
+			PinsArray.Add(MakeShared<FJsonValueString>(Pin->PinName.ToString()));
+		}
+	}
+
+	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
+	ResultData->SetStringField(TEXT("node_id"), NodeId);
+	ResultData->SetStringField(TEXT("variation"), Variation.ToString());
+	ResultData->SetArrayField(TEXT("exec_pins"), PinsArray);
+	return CreateSuccessResponse(ResultData);
+}
+
+
+// User struct pins are named "Field_12_<32 hex guid>"; drop the suffix to keep the output short.
+static FString ShortPinName(const UEdGraphPin* Pin)
+{
+	FString Name = Pin->PinName.ToString();
+	if (Name.Len() > 33 && Name[Name.Len() - 33] == TEXT('_'))
+	{
+		const FString Guid = Name.Right(32);
+		bool bHex = true;
+		for (TCHAR Char : Guid)
+		{
+			bHex &= FChar::IsHexDigit(Char);
+		}
+		if (bHex)
+		{
+			Name.LeftInline(Name.Len() - 33);
+			int32 Underscore;
+			if (Name.FindLastChar(TEXT('_'), Underscore) && Name.Mid(Underscore + 1).IsNumeric())
+			{
+				Name.LeftInline(Underscore);
+			}
+		}
+	}
+	return Name;
+}
+
+bool FGetGraphConnectionsAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	return ValidateGraph(Params, Context, OutError);
+}
+
+TSharedPtr<FJsonObject> FGetGraphConnectionsAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	UBlueprint* Blueprint = GetTargetBlueprint(Params, Context);
+	UEdGraph* TargetGraph = GetTargetGraph(Params, Context);
+
+	// Compact form: nodes are numbered, links are "from.pin>to.pin" (output to input),
+	// defaults are "node.pin=value" for unlinked input pins with a value.
+	TMap<UEdGraphNode*, int32> NodeIndex;
+	TArray<TSharedPtr<FJsonValue>> NodesArray;
+	for (UEdGraphNode* Node : TargetGraph->Nodes)
+	{
+		if (!Node) continue;
+		NodeIndex.Add(Node, NodesArray.Num());
+		FString Title = Node->GetNodeTitle(ENodeTitleType::ListView).ToString();
+		if (UEdGraphNode_Comment* Comment = Cast<UEdGraphNode_Comment>(Node))
+		{
+			Title = TEXT("// ") + Comment->NodeComment;
+		}
+		NodesArray.Add(MakeShared<FJsonValueString>(FString::Printf(TEXT("%d %s | %s"), NodesArray.Num(), *Title, *Node->NodeGuid.ToString())));
+	}
+
+	TArray<TSharedPtr<FJsonValue>> LinksArray;
+	TArray<TSharedPtr<FJsonValue>> DefaultsArray;
+	for (UEdGraphNode* Node : TargetGraph->Nodes)
+	{
+		if (!Node) continue;
+		const int32 From = NodeIndex[Node];
+		for (UEdGraphPin* Pin : Node->Pins)
+		{
+			if (Pin->Direction == EGPD_Output)
+			{
+				for (UEdGraphPin* Linked : Pin->LinkedTo)
+				{
+					const int32* To = Linked ? NodeIndex.Find(Linked->GetOwningNodeUnchecked()) : nullptr;
+					if (!To) continue;
+					LinksArray.Add(MakeShared<FJsonValueString>(FString::Printf(TEXT("%d.%s>%d.%s"), From, *ShortPinName(Pin), *To, *ShortPinName(Linked))));
+				}
+			}
+			else if (Pin->LinkedTo.Num() == 0 && !Pin->bHidden && Pin->PinType.PinCategory != UEdGraphSchema_K2::PC_Exec)
+			{
+				FString DefaultValue = Pin->GetDefaultAsString();
+				if (!DefaultValue.IsEmpty())
+				{
+					DefaultsArray.Add(MakeShared<FJsonValueString>(FString::Printf(TEXT("%d.%s=%s"), From, *ShortPinName(Pin), *DefaultValue)));
+				}
+			}
+		}
+	}
+
+	TArray<TSharedPtr<FJsonValue>> GraphsArray;
+	TArray<UEdGraph*> AllGraphs;
+	Blueprint->GetAllGraphs(AllGraphs);
+	for (UEdGraph* Graph : AllGraphs)
+	{
+		if (Graph) GraphsArray.Add(MakeShared<FJsonValueString>(Graph->GetName()));
+	}
+
+	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
+	ResultData->SetStringField(TEXT("graph"), TargetGraph->GetName());
+	ResultData->SetArrayField(TEXT("graphs"), GraphsArray);
+	ResultData->SetArrayField(TEXT("nodes"), NodesArray);
+	ResultData->SetArrayField(TEXT("links"), LinksArray);
+	ResultData->SetArrayField(TEXT("defaults"), DefaultsArray);
 	return CreateSuccessResponse(ResultData);
 }
 
@@ -811,7 +1012,85 @@ TSharedPtr<FJsonObject> FAddBlueprintVariableAction::ExecuteInternal(const TShar
 	}
 	else
 	{
-		return CreateErrorResponse(FString::Printf(TEXT("Unsupported variable type: %s"), *VariableType));
+		// Generic forms: Array<T>, Class<Name or /Game/Path>, Object<Name or path>, Struct<Name or path>, plus the simple types above inside Array<>
+		FString Inner = VariableType;
+		bool bArray = false;
+		if (Inner.StartsWith(TEXT("Array<")) && Inner.EndsWith(TEXT(">")))
+		{
+			bArray = true;
+			Inner = Inner.Mid(6, Inner.Len() - 7).TrimStartAndEnd();
+		}
+		auto ResolveClass = [](const FString& Name) -> UClass*
+		{
+			UClass* Found = Name.Contains(TEXT("/")) ? LoadObject<UClass>(nullptr, *Name) : nullptr;
+			if (!Found && Name.StartsWith(TEXT("/")))
+			{
+				// /Game/Folder/Asset  ->  /Game/Folder/Asset.Asset_C
+				Found = LoadObject<UClass>(nullptr, *FString::Printf(TEXT("%s.%s_C"), *Name, *FPackageName::GetShortName(Name)));
+			}
+			if (!Found && !Name.StartsWith(TEXT("/")))
+			{
+				IAssetRegistry& Registry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+				TArray<FAssetData> Assets;
+				Registry.GetAssetsByClass(UBlueprint::StaticClass()->GetClassPathName(), Assets);
+				for (const FAssetData& Asset : Assets)
+				{
+					if (Asset.AssetName.ToString().Equals(Name, ESearchCase::IgnoreCase))
+					{
+						if (UBlueprint* BP = Cast<UBlueprint>(Asset.GetAsset()))
+							Found = BP->GeneratedClass;
+						break;
+					}
+				}
+			}
+			if (!Found)
+				Found = FindFirstObject<UClass>(*Name, EFindFirstObjectOptions::NativeFirst);
+			return Found;
+		};
+
+		bool bOk = true;
+		if (Inner == TEXT("Boolean")) PinType.PinCategory = UEdGraphSchema_K2::PC_Boolean;
+		else if (Inner == TEXT("Integer") || Inner == TEXT("Int")) PinType.PinCategory = UEdGraphSchema_K2::PC_Int;
+		else if (Inner == TEXT("Float")) PinType.PinCategory = UEdGraphSchema_K2::PC_Float;
+		else if (Inner == TEXT("String")) PinType.PinCategory = UEdGraphSchema_K2::PC_String;
+		else if ((Inner.StartsWith(TEXT("Class<")) || Inner.StartsWith(TEXT("Object<"))) && Inner.EndsWith(TEXT(">")))
+		{
+			const bool bClass = Inner.StartsWith(TEXT("Class<"));
+			const FString Name = Inner.Mid(bClass ? 6 : 7, Inner.Len() - (bClass ? 7 : 8)).TrimStartAndEnd();
+			UClass* Found = ResolveClass(Name);
+			if (!Found)
+				return CreateErrorResponse(FString::Printf(TEXT("Class not found: %s"), *Name));
+			PinType.PinCategory = bClass ? UEdGraphSchema_K2::PC_Class : UEdGraphSchema_K2::PC_Object;
+			PinType.PinSubCategoryObject = Found;
+		}
+		else if (Inner.StartsWith(TEXT("Struct<")) && Inner.EndsWith(TEXT(">")))
+		{
+			const FString Name = Inner.Mid(7, Inner.Len() - 8).TrimStartAndEnd();
+			UScriptStruct* Struct = Name.StartsWith(TEXT("/")) ? LoadObject<UScriptStruct>(nullptr, *Name) : nullptr;
+			if (!Struct && Name.StartsWith(TEXT("/")))
+				Struct = LoadObject<UScriptStruct>(nullptr, *FString::Printf(TEXT("%s.%s"), *Name, *FPackageName::GetShortName(Name)));
+			if (!Struct)
+			{
+				for (TObjectIterator<UScriptStruct> It; It; ++It)
+				{
+					if (It->GetName().Equals(Name, ESearchCase::IgnoreCase) || It->GetName().Equals(TEXT("F") + Name, ESearchCase::IgnoreCase))
+					{
+						Struct = *It;
+						break;
+					}
+				}
+			}
+			if (!Struct)
+				return CreateErrorResponse(FString::Printf(TEXT("Struct not found: %s"), *Name));
+			PinType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+			PinType.PinSubCategoryObject = Struct;
+		}
+		else bOk = false;
+
+		if (!bOk)
+			return CreateErrorResponse(FString::Printf(TEXT("Unsupported variable type: %s"), *VariableType));
+		if (bArray)
+			PinType.ContainerType = EPinContainerType::Array;
 	}
 
 	// Resolve replication condition up front so we fail before modifying the Blueprint
@@ -1151,6 +1430,57 @@ TSharedPtr<FJsonObject> FSetNodePinDefaultAction::ExecuteInternal(const TSharedP
 	return CreateSuccessResponse(ResultData);
 }
 
+bool FSetNodePropertyAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	FString NodeId, PropertyName;
+	if (!GetRequiredString(Params, TEXT("node_id"), NodeId, OutError)) return false;
+	if (!GetRequiredString(Params, TEXT("property_name"), PropertyName, OutError)) return false;
+	return ValidateGraph(Params, Context, OutError);
+}
+
+TSharedPtr<FJsonObject> FSetNodePropertyAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	const FString NodeId = Params->GetStringField(TEXT("node_id"));
+	const FString PropertyName = Params->GetStringField(TEXT("property_name"));
+	UBlueprint* Blueprint = GetTargetBlueprint(Params, Context);
+	UEdGraph* TargetGraph = GetTargetGraph(Params, Context);
+
+	UEdGraphNode* TargetNode = nullptr;
+	for (UEdGraphNode* Node : TargetGraph->Nodes)
+	{
+		if (Node->NodeGuid.ToString() == NodeId)
+		{
+			TargetNode = Node;
+			break;
+		}
+	}
+	if (!TargetNode)
+	{
+		return CreateErrorResponse(FString::Printf(TEXT("Node not found: %s"), *NodeId));
+	}
+	FProperty* Property = FindFProperty<FProperty>(TargetNode->GetClass(), *PropertyName);
+	if (!Property)
+	{
+		return CreateErrorResponse(FString::Printf(TEXT("Property '%s' not found on %s"), *PropertyName, *TargetNode->GetClass()->GetName()));
+	}
+	FString Value;
+	if (Params->TryGetStringField(TEXT("value"), Value))
+	{
+		TargetNode->Modify();
+		if (!Property->ImportText_InContainer(*Value, TargetNode, TargetNode, PPF_None))
+		{
+			return CreateErrorResponse(FString::Printf(TEXT("Could not set '%s' from '%s'"), *PropertyName, *Value));
+		}
+		MarkBlueprintModified(Blueprint, Context);
+	}
+	FString Current;
+	Property->ExportText_InContainer(0, Current, TargetNode, TargetNode, TargetNode, PPF_None);
+	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
+	ResultData->SetStringField(TEXT("property"), PropertyName);
+	ResultData->SetStringField(TEXT("value"), Current);
+	return CreateSuccessResponse(ResultData);
+}
+
 
 // ============================================================================
 // Function Nodes
@@ -1172,6 +1502,97 @@ TSharedPtr<FJsonObject> FAddBlueprintFunctionNodeAction::ExecuteInternal(const T
 
 	UBlueprint* Blueprint = GetTargetBlueprint(Params, Context);
 	UEdGraph* TargetGraph = GetTargetGraph(Params, Context);
+
+	// MakeStruct / BreakStruct: target = struct name or asset path (e.g. Damage or /Game/Folder/Damage)
+	if (FunctionName.Equals(TEXT("MakeStruct"), ESearchCase::IgnoreCase) || FunctionName.Equals(TEXT("BreakStruct"), ESearchCase::IgnoreCase))
+	{
+		const bool bMake = FunctionName.StartsWith(TEXT("Make"), ESearchCase::IgnoreCase);
+		UScriptStruct* Struct = nullptr;
+		if (Target.StartsWith(TEXT("/")))
+		{
+			Struct = LoadObject<UScriptStruct>(nullptr, *Target);
+			if (!Struct)
+			{
+				Struct = LoadObject<UScriptStruct>(nullptr, *FString::Printf(TEXT("%s.%s"), *Target, *FPackageName::GetShortName(Target)));
+			}
+		}
+		else
+		{
+			IAssetRegistry& AssetRegistry = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry").Get();
+			TArray<FAssetData> Assets;
+			AssetRegistry.GetAssetsByClass(UUserDefinedStruct::StaticClass()->GetClassPathName(), Assets);
+			for (const FAssetData& Asset : Assets)
+			{
+				if (Asset.AssetName.ToString().Equals(Target, ESearchCase::IgnoreCase))
+				{
+					Struct = Cast<UScriptStruct>(Asset.GetAsset());
+					break;
+				}
+			}
+			if (!Struct)
+			{
+				for (TObjectIterator<UScriptStruct> It; It; ++It)
+				{
+					if (It->GetName().Equals(Target, ESearchCase::IgnoreCase) || It->GetName().Equals(TEXT("F") + Target, ESearchCase::IgnoreCase))
+					{
+						Struct = *It;
+						break;
+					}
+				}
+			}
+		}
+		if (!Struct)
+		{
+			return CreateErrorResponse(FString::Printf(TEXT("Struct not found: %s"), *Target));
+		}
+
+		UK2Node* StructNode = nullptr;
+		if (bMake)
+		{
+			StructNode = FEdGraphSchemaAction_K2NewNode::SpawnNode<UK2Node_MakeStruct>(
+				TargetGraph, Position, EK2NewNodeFlags::None,
+				[Struct](UK2Node_MakeStruct* Node) { Node->StructType = Struct; });
+		}
+		else
+		{
+			StructNode = FEdGraphSchemaAction_K2NewNode::SpawnNode<UK2Node_BreakStruct>(
+				TargetGraph, Position, EK2NewNodeFlags::None,
+				[Struct](UK2Node_BreakStruct* Node) { Node->StructType = Struct; });
+		}
+		MarkBlueprintModified(Blueprint, Context);
+		RegisterCreatedNode(StructNode, Context);
+
+		TSharedPtr<FJsonObject> StructResult = MakeShared<FJsonObject>();
+		StructResult->SetStringField(TEXT("node_id"), StructNode->NodeGuid.ToString());
+		return CreateSuccessResponse(StructResult);
+	}
+
+	// GetDataTableRow: target = DataTable asset path (e.g. /Game/Folder/Table). The output row pin gets the table's row struct.
+	if (FunctionName.Equals(TEXT("GetDataTableRow"), ESearchCase::IgnoreCase))
+	{
+		UDataTable* Table = LoadObject<UDataTable>(nullptr, *Target);
+		if (!Table)
+		{
+			Table = LoadObject<UDataTable>(nullptr, *FString::Printf(TEXT("%s.%s"), *Target, *FPackageName::GetShortName(Target)));
+		}
+		if (!Table)
+		{
+			return CreateErrorResponse(FString::Printf(TEXT("DataTable not found: %s"), *Target));
+		}
+		UK2Node_GetDataTableRow* RowNode = FEdGraphSchemaAction_K2NewNode::SpawnNode<UK2Node_GetDataTableRow>(
+			TargetGraph, Position, EK2NewNodeFlags::None, [](UK2Node_GetDataTableRow* Node) {});
+		if (UEdGraphPin* TablePin = RowNode->GetDataTablePin())
+		{
+			TablePin->DefaultObject = Table;
+			RowNode->PinDefaultValueChanged(TablePin);
+		}
+		MarkBlueprintModified(Blueprint, Context);
+		RegisterCreatedNode(RowNode, Context);
+
+		TSharedPtr<FJsonObject> RowResult = MakeShared<FJsonObject>();
+		RowResult->SetStringField(TEXT("node_id"), RowNode->NodeGuid.ToString());
+		return CreateSuccessResponse(RowResult);
+	}
 
 	// Find the function
 	UFunction* Function = nullptr;
@@ -1351,6 +1772,36 @@ TSharedPtr<FJsonObject> FAddBlueprintBranchNodeAction::ExecuteInternal(const TSh
 }
 
 
+bool FAddAnimSlotNodeAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	FString SlotName;
+	if (!GetRequiredString(Params, TEXT("slot_name"), SlotName, OutError)) return false;
+	return ValidateGraph(Params, Context, OutError);
+}
+
+// Params: blueprint_name (an Animation Blueprint), graph_name (AnimGraph), slot_name (e.g. DefaultSlot), node_position.
+// Pins of the new node: Source (input pose), Pose (output pose).
+TSharedPtr<FJsonObject> FAddAnimSlotNodeAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	FVector2D Position = GetNodePosition(Params);
+
+	UBlueprint* Blueprint = GetTargetBlueprint(Params, Context);
+	UEdGraph* TargetGraph = GetTargetGraph(Params, Context);
+
+	UAnimGraphNode_Slot* SlotNode = FEdGraphSchemaAction_K2NewNode::SpawnNode<UAnimGraphNode_Slot>(
+		TargetGraph, Position, EK2NewNodeFlags::None
+	);
+	SlotNode->Node.SlotName = FName(*Params->GetStringField(TEXT("slot_name")));
+
+	MarkBlueprintModified(Blueprint, Context);
+	RegisterCreatedNode(SlotNode, Context);
+
+	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
+	ResultData->SetStringField(TEXT("node_id"), SlotNode->NodeGuid.ToString());
+	return CreateSuccessResponse(ResultData);
+}
+
+
 bool FAddArrayGetNodeAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
 {
 	return ValidateGraph(Params, Context, OutError);
@@ -1478,7 +1929,11 @@ TSharedPtr<FJsonObject> FAddBlueprintGetSubsystemNodeAction::ExecuteInternal(con
 	FVector2D Position = GetNodePosition(Params);
 
 	UBlueprint* Blueprint = GetTargetBlueprint(Params, Context);
-	UEdGraph* EventGraph = FMCPCommonUtils::FindOrCreateEventGraph(Blueprint);
+	UEdGraph* EventGraph = Params->HasField(TEXT("graph_name")) ? GetTargetGraph(Params, Context) : FMCPCommonUtils::FindOrCreateEventGraph(Blueprint);
+	if (!EventGraph)
+	{
+		return CreateErrorResponse(TEXT("Graph not found"), TEXT("graph_not_found"));
+	}
 
 	// Find the subsystem class
 	UClass* FoundClass = nullptr;
@@ -1495,6 +1950,7 @@ TSharedPtr<FJsonObject> FAddBlueprintGetSubsystemNodeAction::ExecuteInternal(con
 			TEXT("/Script/EnhancedInput"),
 			TEXT("/Script/Engine"),
 			TEXT("/Script/GameplayAbilities"),
+				TEXT("/Script/MyProject"),
 		};
 
 		for (const FString& ModulePath : ModulePaths)
@@ -1513,7 +1969,10 @@ TSharedPtr<FJsonObject> FAddBlueprintGetSubsystemNodeAction::ExecuteInternal(con
 	// Create the K2Node_GetSubsystemFromPC node (gets subsystem from PlayerController).
 	// The class is not exported from BlueprintGraph on UE4, so it is looked up by name and
 	// initialised through its exported base class UK2Node_GetSubsystem.
-	UClass* SubsystemNodeClass = FindObject<UClass>(nullptr, TEXT("/Script/BlueprintGraph.K2Node_GetSubsystemFromPC"));
+	// GameInstance subsystems use the plain K2Node_GetSubsystem (its Get function is chosen from the class); local player ones the FromPC node.
+	UClass* SubsystemNodeClass = FoundClass->IsChildOf(UGameInstanceSubsystem::StaticClass())
+		? UK2Node_GetSubsystem::StaticClass()
+		: FindObject<UClass>(nullptr, TEXT("/Script/BlueprintGraph.K2Node_GetSubsystemFromPC"));
 	if (!SubsystemNodeClass)
 	{
 		return CreateErrorResponse(TEXT("K2Node_GetSubsystemFromPC class not found in this engine version"), TEXT("not_found"));

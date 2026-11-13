@@ -605,7 +605,7 @@ bool FTakeScreenshotAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCP
 		OutError = FString::Printf(TEXT("Invalid target '%s'. Use auto, pie or editor."), *Target);
 		return false;
 	}
-	if (GetOptionalNumber(Params, TEXT("max_width"), 960.0) < 0.0)
+	if (GetOptionalNumber(Params, TEXT("max_width"), 480.0) < 0.0)
 	{
 		OutError = TEXT("max_width must not be negative (0 = full size)");
 		return false;
@@ -642,7 +642,27 @@ TSharedPtr<FJsonObject> FTakeScreenshotAction::ExecuteInternal(const TSharedPtr<
 
 	int32 Width = Size.X;
 	int32 Height = Size.Y;
-	const int32 MaxWidth = static_cast<int32>(GetOptionalNumber(Params, TEXT("max_width"), 960.0));
+
+	// Optional crop to a part of the view, [x0, y0, x1, y1] as fractions of the view (0..1), so a detail costs fewer pixels
+	const TArray<TSharedPtr<FJsonValue>>* Region = nullptr;
+	if (Params.IsValid() && Params->TryGetArrayField(TEXT("region"), Region) && Region && Region->Num() == 4)
+	{
+		const int32 X0 = FMath::Clamp(FMath::FloorToInt((*Region)[0]->AsNumber() * Width), 0, Width - 1);
+		const int32 Y0 = FMath::Clamp(FMath::FloorToInt((*Region)[1]->AsNumber() * Height), 0, Height - 1);
+		const int32 X1 = FMath::Clamp(FMath::CeilToInt((*Region)[2]->AsNumber() * Width), X0 + 1, Width);
+		const int32 Y1 = FMath::Clamp(FMath::CeilToInt((*Region)[3]->AsNumber() * Height), Y0 + 1, Height);
+		TArray<FColor> Cropped;
+		Cropped.Reserve((X1 - X0) * (Y1 - Y0));
+		for (int32 Y = Y0; Y < Y1; ++Y)
+		{
+			Cropped.Append(&Pixels[Y * Width + X0], X1 - X0);
+		}
+		Pixels = MoveTemp(Cropped);
+		Width = X1 - X0;
+		Height = Y1 - Y0;
+	}
+
+	const int32 MaxWidth = static_cast<int32>(GetOptionalNumber(Params, TEXT("max_width"), 480.0));
 	if (MaxWidth > 0 && Width > MaxWidth)
 	{
 		const int32 NewHeight = FMath::Max(1, static_cast<int32>(static_cast<int64>(Height) * MaxWidth / Width));

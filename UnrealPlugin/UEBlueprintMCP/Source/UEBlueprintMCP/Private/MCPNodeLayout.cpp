@@ -115,7 +115,9 @@ namespace
 		}
 
 		const UK2Node* K2Node = Cast<UK2Node>(Node);
-		if (K2Node && K2Node->ShouldDrawAsBead())
+		// Reroute knots draw as a small dot (UK2Node::ShouldDrawAsBead is gone in 5.8; this exists in every version)
+		int32 KnotInputPin = INDEX_NONE, KnotOutputPin = INDEX_NONE;
+		if (Node->ShouldDrawNodeAsControlPointOnly(KnotInputPin, KnotOutputPin))
 		{
 			Metrics.Size = FVector2D(24.f, 24.f);
 			Metrics.Header = 0.f;

@@ -208,7 +208,7 @@ namespace
 		double CurrentStartTime = 0.0;
 		double ElapsedAtEnd = 0.0;
 		int64 LogCursor = 0;
-		FDelegateHandle TickerHandle;
+		MCPCompat::FTickerHandle TickerHandle;
 	};
 
 	/** Load test modules and fetch every test that can run in this editor. */
@@ -216,7 +216,11 @@ namespace
 	{
 		FAutomationTestFramework& Framework = FAutomationTestFramework::Get();
 		Framework.LoadTestModules();
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 5)
+		Framework.SetRequestedTestFilter(EAutomationTestFlags_FilterMask); // the enum member became a constant in 5.5
+#else
 		Framework.SetRequestedTestFilter(EAutomationTestFlags::FilterMask);
+#endif
 		Framework.GetValidTestNames(OutTests);
 	}
 

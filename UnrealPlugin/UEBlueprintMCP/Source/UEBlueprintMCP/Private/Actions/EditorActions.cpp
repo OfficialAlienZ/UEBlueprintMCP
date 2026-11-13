@@ -18,6 +18,16 @@
 #include "Algo/Sort.h"
 #include "FileHelpers.h"
 #include "UObject/SavePackage.h"
+#include "AssetToolsModule.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "K2Node.h"
+#include "EdGraph/EdGraph.h"
+#include "Kismet2/KismetEditorUtilities.h"
+#include "Engine/Blueprint.h"
+#include "Kismet2/StructureEditorUtils.h"
+#include "StructUtils/UserDefinedStruct.h"
+#include "UserDefinedStructure/UserDefinedStructEditorData.h"
+#include "Misc/PackageName.h"
 
 
 // Helper to find actor by name (stops at the first match)
@@ -783,5 +793,224 @@ TSharedPtr<FJsonObject> FSaveAllAction::ExecuteInternal(const TSharedPtr<FJsonOb
 	}
 	Result->SetArrayField(TEXT("saved_packages"), PackagesArray);
 
+	return CreateSuccessResponse(Result);
+}
+
+
+// =========================================================================
+// FSetAssetPropertyAction
+// =========================================================================
+
+bool FSetAssetPropertyAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	FString Value;
+	if (!GetRequiredString(Params, TEXT("object_path"), Value, OutError)) return false;
+	if (!GetRequiredString(Params, TEXT("property_name"), Value, OutError)) return false;
+	if (!Params->HasField(TEXT("property_value")))
+	{
+		OutError = TEXT("Missing 'property_value'");
+		return false;
+	}
+	return true;
+}
+
+TSharedPtr<FJsonObject> FSetAssetPropertyAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	const FString ObjectPath = Params->GetStringField(TEXT("object_path"));
+	const FString PropertyName = Params->GetStringField(TEXT("property_name"));
+
+	UObject* Object = LoadObject<UObject>(nullptr, *ObjectPath);
+	if (!Object)
+	{
+		return CreateErrorResponse(FString::Printf(TEXT("Object not found: %s"), *ObjectPath), TEXT("not_found"));
+	}
+	FProperty* Property = Object->GetClass()->FindPropertyByName(*PropertyName);
+	if (!Property)
+	{
+		return CreateErrorResponse(FString::Printf(TEXT("Property not found: %s"), *PropertyName), TEXT("not_found"));
+	}
+
+	// Structs take Unreal text with only the fields to change, e.g. NaniteSettings = (bEnabled=True)
+	Object->Modify();
+	Object->PreEditChange(Property);
+	FString Error;
+	if (!FMCPCommonUtils::SetObjectProperty(Object, PropertyName, Params->TryGetField(TEXT("property_value")), Error))
+	{
+		return CreateErrorResponse(Error, TEXT("property_set_failed"));
+	}
+	// Lets the asset react as if edited in its editor (e.g. a Static Mesh rebuilds its Nanite data)
+	FPropertyChangedEvent ChangedEvent(Property, EPropertyChangeType::ValueSet);
+	Object->PostEditChangeProperty(ChangedEvent);
+	Object->MarkPackageDirty();
+	Context.MarkPackageDirty(Object->GetOutermost());
+
+	FString NewValue;
+	Property->ExportTextItem_Direct(NewValue, Property->ContainerPtrToValuePtr<void>(Object), nullptr, Object, PPF_None);
+	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("object"), Object->GetPathName());
+	Result->SetStringField(TEXT("property"), PropertyName);
+	Result->SetStringField(TEXT("value"), NewValue);
+	return CreateSuccessResponse(Result);
+}
+
+
+// =========================================================================
+// FDuplicateAssetAction
+// =========================================================================
+
+bool FDuplicateAssetAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	FString Value;
+	if (!GetRequiredString(Params, TEXT("source_path"), Value, OutError)) return false;
+	return GetRequiredString(Params, TEXT("dest_path"), Value, OutError);
+}
+
+TSharedPtr<FJsonObject> FDuplicateAssetAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	const FString SourcePath = Params->GetStringField(TEXT("source_path"));
+	FString DestPath = Params->GetStringField(TEXT("dest_path"));
+	if (DestPath.Contains(TEXT(".")))
+	{
+		DestPath = FPackageName::ObjectPathToPackageName(DestPath);
+	}
+
+	UObject* Source = LoadObject<UObject>(nullptr, *SourcePath);
+	if (!Source)
+	{
+		return CreateErrorResponse(FString::Printf(TEXT("Asset not found: %s"), *SourcePath), TEXT("not_found"));
+	}
+	if (FPackageName::DoesPackageExist(DestPath) || FindPackage(nullptr, *DestPath))
+	{
+		return CreateErrorResponse(FString::Printf(TEXT("Asset already exists: %s"), *DestPath), TEXT("already_exists"));
+	}
+
+	IAssetTools& AssetTools = FModuleManager::LoadModuleChecked<FAssetToolsModule>(TEXT("AssetTools")).Get();
+	UObject* Copy = AssetTools.DuplicateAsset(FPackageName::GetShortName(DestPath), FPackageName::GetLongPackagePath(DestPath), Source);
+	if (!Copy)
+	{
+		return CreateErrorResponse(FString::Printf(TEXT("Could not duplicate %s to %s"), *SourcePath, *DestPath), TEXT("duplicate_failed"));
+	}
+	Context.MarkPackageDirty(Copy->GetOutermost());
+
+	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("path"), Copy->GetPathName());
+	Result->SetStringField(TEXT("class"), Copy->GetClass()->GetName());
+	return CreateSuccessResponse(Result);
+}
+
+
+// =========================================================================
+// FRenameStructMemberAction
+// =========================================================================
+
+bool FRenameStructMemberAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	FString Value;
+	return GetRequiredString(Params, TEXT("struct_path"), Value, OutError)
+		&& GetRequiredString(Params, TEXT("old_name"), Value, OutError)
+		&& GetRequiredString(Params, TEXT("new_name"), Value, OutError);
+}
+
+TSharedPtr<FJsonObject> FRenameStructMemberAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	const FString StructPath = Params->GetStringField(TEXT("struct_path"));
+	const FString OldName = Params->GetStringField(TEXT("old_name"));
+	const FString NewName = Params->GetStringField(TEXT("new_name"));
+
+	UUserDefinedStruct* Struct = LoadObject<UUserDefinedStruct>(nullptr, *StructPath);
+	if (!Struct)
+	{
+		return CreateErrorResponse(FString::Printf(TEXT("User defined struct not found: %s"), *StructPath), TEXT("not_found"));
+	}
+
+	FGuid VarGuid;
+	FString OldVar;
+	for (const FStructVariableDescription& Var : FStructureEditorUtils::GetVarDesc(Struct))
+	{
+		if (Var.VarName.ToString() == OldName || Var.FriendlyName == OldName)
+		{
+			VarGuid = Var.VarGuid;
+			OldVar = Var.VarName.ToString();
+			break;
+		}
+	}
+	if (!VarGuid.IsValid())
+	{
+		return CreateErrorResponse(FString::Printf(TEXT("Member not found: %s"), *OldName), TEXT("not_found"));
+	}
+	if (!FStructureEditorUtils::RenameVariable(Struct, VarGuid, NewName))
+	{
+		return CreateErrorResponse(FString::Printf(TEXT("Could not rename %s to %s (name in use or invalid)"), *OldName, *NewName), TEXT("rename_failed"));
+	}
+	FString NewVar;
+	for (const FStructVariableDescription& Var : FStructureEditorUtils::GetVarDesc(Struct))
+	{
+		if (Var.VarGuid == VarGuid) { NewVar = Var.VarName.ToString(); break; }
+	}
+
+	// The engine gives the member a new internal name, which orphans split/struct pins (e.g. "stats_healthRegen_18_GUID")
+	// in every Blueprint using the struct. Move links and defaults from each orphan pin to its renamed counterpart.
+	int32 MigratedPins = 0;
+	TArray<UBlueprint*> TouchedBlueprints;
+	if (!NewVar.IsEmpty() && NewVar != OldVar)
+	{
+		IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+		TArray<FName> Referencers;
+		AR.GetReferencers(Struct->GetOutermost()->GetFName(), Referencers);
+		for (const FName& RefName : Referencers)
+		{
+			UPackage* Pkg = LoadPackage(nullptr, *RefName.ToString(), LOAD_None);
+			if (!Pkg) continue;
+			TArray<UK2Node*> Nodes;
+			ForEachObjectWithPackage(Pkg, [&Nodes](UObject* Obj)
+			{
+				if (UK2Node* Node = Cast<UK2Node>(Obj)) Nodes.Add(Node);
+				return true;
+			});
+			bool bPackageTouched = false;
+			for (UK2Node* Node : Nodes)
+			{
+				TArray<UEdGraphPin*> Orphans;
+				for (UEdGraphPin* Pin : Node->Pins)
+				{
+					if (Pin && Pin->PinName.ToString().Contains(OldVar)) Orphans.Add(Pin);
+				}
+				for (UEdGraphPin* OldPin : Orphans)
+				{
+					const FName NewPinName(*OldPin->PinName.ToString().Replace(*OldVar, *NewVar));
+					UEdGraphPin* NewPin = Node->FindPin(NewPinName, OldPin->Direction);
+					if (!NewPin || NewPin == OldPin) continue;
+					TArray<UEdGraphPin*> Links = OldPin->LinkedTo;
+					for (UEdGraphPin* Other : Links) NewPin->MakeLinkTo(Other);
+					NewPin->DefaultValue = OldPin->DefaultValue;
+					NewPin->DefaultObject = OldPin->DefaultObject;
+					NewPin->DefaultTextValue = OldPin->DefaultTextValue;
+					if (OldPin->ParentPin) OldPin->ParentPin->SubPins.Remove(OldPin);
+					OldPin->BreakAllPinLinks();
+					Node->RemovePin(OldPin);
+					++MigratedPins;
+					bPackageTouched = true;
+				}
+			}
+			if (bPackageTouched)
+			{
+				if (UBlueprint* BP = FindObject<UBlueprint>(Pkg, *FPackageName::GetShortName(RefName)))
+				{
+					TouchedBlueprints.Add(BP);
+				}
+				Context.MarkPackageDirty(Pkg);
+			}
+		}
+		for (UBlueprint* BP : TouchedBlueprints)
+		{
+			FKismetEditorUtilities::CompileBlueprint(BP);
+		}
+	}
+	Context.MarkPackageDirty(Struct->GetOutermost());
+
+	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("struct"), Struct->GetPathName());
+	Result->SetStringField(TEXT("new_name"), NewName);
+	Result->SetNumberField(TEXT("migrated_pins"), MigratedPins);
 	return CreateSuccessResponse(Result);
 }

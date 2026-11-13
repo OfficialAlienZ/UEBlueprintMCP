@@ -10,6 +10,9 @@ class UWidgetBlueprint;
 /** Resolve a Widget Blueprint by name or path (/Game/UI, /Game/Widgets, /Game, or a full /Game/... path). */
 UEBLUEPRINTMCP_API UWidgetBlueprint* FindWidgetBlueprintByName(const FString& BlueprintName);
 
+/** Re-sync WidgetVariableNameToGuidMap with the widget tree; call before compiling a Widget Blueprint edited here. */
+UEBLUEPRINTMCP_API void MCPSyncWidgetVariableGuids(UWidgetBlueprint* BP);
+
 /**
  * Create a UMG Widget Blueprint
  */
@@ -30,6 +33,20 @@ class UEBLUEPRINTMCP_API FAddTextBlockToWidgetAction : public FEditorAction
 {
 public:
 	virtual FString GetActionName() const override { return TEXT("AddTextBlockToWidget"); }
+
+protected:
+	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
+	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
+};
+
+/**
+ * Add any widget (UMG class or Widget Blueprint) to a Widget Blueprint's designer tree, or put it in place of an
+ * existing widget (same slot and layout), and set its properties from Unreal text
+ */
+class UEBLUEPRINTMCP_API FAddWidgetToWidgetAction : public FEditorAction
+{
+public:
+	virtual FString GetActionName() const override { return TEXT("AddWidgetToWidget"); }
 
 protected:
 	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
@@ -82,6 +99,20 @@ class UEBLUEPRINTMCP_API FRemoveWidgetAction : public FEditorAction
 {
 public:
 	virtual FString GetActionName() const override { return TEXT("RemoveWidget"); }
+
+protected:
+	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
+	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
+};
+
+/**
+ * Move a widget inside its panel (index) or to another panel (parent_name, optional index).
+ * Params: widget_name (Widget Blueprint), target_widget, parent_name (optional), index (optional; default append)
+ */
+class UEBLUEPRINTMCP_API FMoveWidgetAction : public FEditorAction
+{
+public:
+	virtual FString GetActionName() const override { return TEXT("MoveWidget"); }
 
 protected:
 	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;

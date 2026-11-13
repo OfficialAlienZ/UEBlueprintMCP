@@ -5,6 +5,9 @@
 #include "MCPInspectionUtils.h"
 #include "Editor.h"
 #include "Engine/Blueprint.h"
+#include "WidgetBlueprint.h"
+#include "Blueprint/WidgetTree.h"
+#include "Components/Widget.h"
 #include "Engine/SCS_Node.h"
 #include "Engine/World.h"
 #include "EngineUtils.h"
@@ -194,6 +197,27 @@ UObject* FGetObjectPropertiesAction::ResolveTarget(const TSharedPtr<FJsonObject>
 			if (Node->ComponentTemplate)
 			{
 				return Node->ComponentTemplate;
+			}
+		}
+		// Widget Blueprints: a widget of the WidgetTree, or "Name.Slot" for its layout slot
+		if (UWidgetBlueprint* WidgetBP = Cast<UWidgetBlueprint>(Blueprint))
+		{
+			FString WidgetName = ComponentName;
+			const bool bSlot = WidgetName.EndsWith(TEXT(".Slot"));
+			if (bSlot)
+			{
+				WidgetName.LeftChopInline(5);
+			}
+			if (UWidget* Widget = WidgetBP->WidgetTree ? WidgetBP->WidgetTree->FindWidget(FName(*WidgetName)) : nullptr)
+			{
+				if (!bSlot)
+				{
+					return Widget;
+				}
+				if (Widget->Slot)
+				{
+					return Widget->Slot;
+				}
 			}
 		}
 		if (AActor* ActorDefault = Cast<AActor>(DefaultObject))

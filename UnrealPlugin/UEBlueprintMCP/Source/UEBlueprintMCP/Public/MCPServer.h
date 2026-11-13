@@ -4,6 +4,7 @@
 
 #include "CoreMinimal.h"
 #include "HAL/Runnable.h"
+#include "Async/Future.h"
 #include "Sockets.h"
 #include "SocketSubsystem.h"
 
@@ -85,6 +86,10 @@ private:
 
 	/** Server thread */
 	FRunnableThread* Thread;
+
+	/** One task per connected client */
+	TArray<TFuture<void>> ClientTasks;
+	FCriticalSection ClientTasksLock;
 
 	/** Flag to signal thread to stop */
 	TAtomic<bool> bShouldStop;

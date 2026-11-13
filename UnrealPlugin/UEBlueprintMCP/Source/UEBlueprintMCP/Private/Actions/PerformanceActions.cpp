@@ -92,7 +92,11 @@ namespace
 			return FString();
 		}
 		FString Text;
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+		Property->ExportTextItem_Direct(Text, Property->ContainerPtrToValuePtr<void>(Object), nullptr, Object, PPF_None);
+#else
 		Property->ExportTextItem(Text, Property->ContainerPtrToValuePtr<void>(Object), nullptr, Object, PPF_None);
+#endif
 		return Text;
 	}
 
@@ -479,7 +483,11 @@ TSharedPtr<FJsonObject> FGetPerformanceStatsAction::ExecuteInternal(const TShare
 	const double GameMs = Perf_Ms(GGameThreadTime);
 	const double RenderMs = Perf_Ms(GRenderThreadTime);
 	const double RHIMs = Perf_Ms(GRHIThreadTime);
+#if MCP_UE5
+	const double GpuMs = Perf_Ms(RHIGetGPUFrameCycles());
+#else
 	const double GpuMs = Perf_Ms(GGPUFrameTime);
+#endif
 	const double FrameMs = GAverageMS;
 
 	Result->SetNumberField(TEXT("fps"), GAverageFPS);
@@ -530,7 +538,11 @@ TSharedPtr<FJsonObject> FGetPerformanceStatsAction::ExecuteInternal(const TShare
 	{
 		FTextureMemoryStats TextureStats;
 		RHIGetTextureMemoryStats(TextureStats);
+#if MCP_UE5
+		Memory->SetNumberField(TEXT("texture_allocated_mb"), Perf_MB(TextureStats.StreamingMemorySize + TextureStats.NonStreamingMemorySize));
+#else
 		Memory->SetNumberField(TEXT("texture_allocated_mb"), Perf_MB(TextureStats.AllocatedMemorySize));
+#endif
 		Memory->SetNumberField(TEXT("texture_pool_mb"), Perf_MB(TextureStats.TexturePoolSize));
 		if (TextureStats.TotalGraphicsMemory >= 0)
 		{
