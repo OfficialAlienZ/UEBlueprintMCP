@@ -74,7 +74,11 @@ namespace
 			return FString();
 		}
 		FString Text;
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+		Property->ExportTextItem_Direct(Text, Property->ContainerPtrToValuePtr<void>(Object), nullptr, Object, PPF_None);
+#else
 		Property->ExportTextItem(Text, Property->ContainerPtrToValuePtr<void>(Object), nullptr, Object, PPF_None);
+#endif
 		return Text;
 	}
 	template <typename EnumType>

@@ -125,7 +125,7 @@ TSharedPtr<FJsonObject> FSetTextBlockBindingAction::ExecuteInternal(const TShare
 		{
 			return CreateErrorResponse(TEXT("Failed to create binding function graph"), TEXT("execution_failed"));
 		}
-		FBlueprintEditorUtils::AddFunctionGraph(WidgetBlueprint, FunctionGraph, /*bIsUserCreated*/ true, DelegateProp->SignatureFunction);
+		FBlueprintEditorUtils::AddFunctionGraph<UFunction>(WidgetBlueprint, FunctionGraph, /*bIsUserCreated*/ true, DelegateProp->SignatureFunction);
 		bCreated = true;
 	}
 
