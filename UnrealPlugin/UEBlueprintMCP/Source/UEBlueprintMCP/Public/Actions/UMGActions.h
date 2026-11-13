@@ -98,6 +98,20 @@ protected:
 };
 
 /**
+ * Move a widget inside its panel (index) or to another panel (parent_name, optional index).
+ * Params: widget_name (Widget Blueprint), target_widget, parent_name (optional), index (optional; default append)
+ */
+class UEBLUEPRINTMCP_API FMoveWidgetAction : public FEditorAction
+{
+public:
+	virtual FString GetActionName() const override { return TEXT("MoveWidget"); }
+
+protected:
+	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
+	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
+};
+
+/**
  * Bind a widget event to a function
  */
 class UEBLUEPRINTMCP_API FBindWidgetEventAction : public FEditorAction

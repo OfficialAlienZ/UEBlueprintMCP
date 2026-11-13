@@ -123,6 +123,7 @@ void UMCPBridge::RegisterActions()
 	ActionHandlers.Add(TEXT("save_all"), MakeShared<FSaveAllAction>());
 	ActionHandlers.Add(TEXT("set_asset_property"), MakeShared<FSetAssetPropertyAction>());
 	ActionHandlers.Add(TEXT("duplicate_asset"), MakeShared<FDuplicateAssetAction>());
+	ActionHandlers.Add(TEXT("rename_struct_member"), MakeShared<FRenameStructMemberAction>());
 
 	// =========================================================================
 	// PIE / Runtime Feedback Actions
@@ -179,6 +180,7 @@ void UMCPBridge::RegisterActions()
 	ActionHandlers.Add(TEXT("add_blueprint_self_reference"), MakeShared<FAddBlueprintSelfReferenceAction>());
 	ActionHandlers.Add(TEXT("add_blueprint_get_self_component_reference"), MakeShared<FAddBlueprintGetSelfComponentReferenceAction>());
 	ActionHandlers.Add(TEXT("add_blueprint_branch_node"), MakeShared<FAddBlueprintBranchNodeAction>());
+	ActionHandlers.Add(TEXT("add_anim_slot_node"), MakeShared<FAddAnimSlotNodeAction>());
 	ActionHandlers.Add(TEXT("add_blueprint_cast_node"), MakeShared<FAddBlueprintCastNodeAction>());
 	ActionHandlers.Add(TEXT("add_blueprint_get_subsystem_node"), MakeShared<FAddBlueprintGetSubsystemNodeAction>());
 
@@ -231,6 +233,7 @@ void UMCPBridge::RegisterActions()
 	ActionHandlers.Add(TEXT("add_image_to_widget"), MakeShared<FAddImageToWidgetAction>());
 	ActionHandlers.Add(TEXT("duplicate_widget"), MakeShared<FDuplicateWidgetAction>());
 	ActionHandlers.Add(TEXT("remove_widget"), MakeShared<FRemoveWidgetAction>());
+	ActionHandlers.Add(TEXT("move_widget"), MakeShared<FMoveWidgetAction>());
 	ActionHandlers.Add(TEXT("bind_widget_event"), MakeShared<FBindWidgetEventAction>());
 	ActionHandlers.Add(TEXT("add_widget_to_viewport"), MakeShared<FAddWidgetToViewportAction>());
 	ActionHandlers.Add(TEXT("set_text_block_binding"), MakeShared<FSetTextBlockBindingAction>());

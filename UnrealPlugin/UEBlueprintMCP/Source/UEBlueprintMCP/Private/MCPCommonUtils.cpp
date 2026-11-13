@@ -16,6 +16,7 @@
 #include "EdGraphSchema_K2.h"
 #include "K2Node_Event.h"
 #include "K2Node_ComponentBoundEvent.h"
+#include "K2Node_CallArrayFunction.h"
 #include "K2Node_CallFunction.h"
 #include "K2Node_Message.h"
 #include "K2Node_VariableGet.h"
@@ -919,7 +920,14 @@ UK2Node_CallFunction* FMCPCommonUtils::CreateFunctionCallNode(UEdGraph* Graph, U
 
 	// Interface functions are sent as messages (any object as target), like dragging them from the palette
 	const UClass* Owner = Function->GetOwnerClass();
-	UK2Node_CallFunction* FunctionNode = (Owner && Owner->HasAnyClassFlags(CLASS_Interface)) ? NewObject<UK2Node_Message>(Graph) : NewObject<UK2Node_CallFunction>(Graph);
+	// Functions with ArrayParm (wildcard array pins, e.g. Array Add) need K2Node_CallArrayFunction to propagate the array type.
+	UK2Node_CallFunction* FunctionNode = nullptr;
+	if (Owner && Owner->HasAnyClassFlags(CLASS_Interface))
+		FunctionNode = NewObject<UK2Node_Message>(Graph);
+	else if (Function->HasMetaData(TEXT("ArrayParm")))
+		FunctionNode = NewObject<UK2Node_CallArrayFunction>(Graph);
+	else
+		FunctionNode = NewObject<UK2Node_CallFunction>(Graph);
 	if (!FunctionNode)
 	{
 		return nullptr;

@@ -257,6 +257,17 @@ protected:
 };
 
 
+/** Add a Slot node (montage slot) to an Animation Blueprint's AnimGraph */
+class UEBLUEPRINTMCP_API FAddAnimSlotNodeAction : public FBlueprintNodeAction
+{
+public:
+	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
+protected:
+	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
+	virtual FString GetActionName() const override { return TEXT("add_anim_slot_node"); }
+};
+
+
 /** Add a cast node */
 class UEBLUEPRINTMCP_API FAddBlueprintCastNodeAction : public FBlueprintNodeAction
 {

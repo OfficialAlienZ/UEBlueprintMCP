@@ -8,6 +8,7 @@
 #include "Blueprint/UserWidget.h"
 #include "Components/TextBlock.h"
 #include "WidgetBlueprint.h"
+#include "Animation/WidgetAnimation.h"
 #include "WidgetBlueprintEditor.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/CanvasPanel.h"
@@ -25,6 +26,56 @@
 #include "Kismet2/KismetEditorUtilities.h"
 
 // Helper to find widget blueprint in common paths
+// The UMG compiler requires every widget of the tree (variable or not) to have an entry in WidgetVariableNameToGuidMap (normally kept by the
+// designer through OnVariableAdded/Removed). We set bIsVariable and add/remove widgets directly, so re-sync the map before compiling.
+static void SyncWidgetVariableGuids(UWidgetBlueprint* BP)
+{
+	if (!BP || !BP->WidgetTree)
+	{
+		return;
+	}
+	TSet<FName> VarNames;
+	BP->WidgetTree->ForEachWidget([&VarNames](UWidget* W)
+	{
+		if (W)
+		{
+			VarNames.Add(W->GetFName());
+		}
+	});
+	for (const FName& Name : VarNames)
+	{
+		if (!BP->WidgetVariableNameToGuidMap.Contains(Name))
+		{
+			BP->OnVariableAdded(Name);
+		}
+	}
+	TArray<FName> Stale;
+	for (const TPair<FName, FGuid>& Pair : BP->WidgetVariableNameToGuidMap)
+	{
+		if (VarNames.Contains(Pair.Key))
+		{
+			continue;
+		}
+		bool bIsAnimation = false;
+		for (UWidgetAnimation* Anim : BP->Animations)
+		{
+			if (Anim && Anim->GetFName() == Pair.Key)
+			{
+				bIsAnimation = true;
+				break;
+			}
+		}
+		if (!bIsAnimation)
+		{
+			Stale.Add(Pair.Key);
+		}
+	}
+	for (const FName& Name : Stale)
+	{
+		BP->OnVariableRemoved(Name);
+	}
+}
+
 static UWidgetBlueprint* FindWidgetBlueprintByName(const FString& BlueprintName)
 {
 	TArray<FString> SearchPaths = {
@@ -214,6 +265,7 @@ TSharedPtr<FJsonObject> FCreateUMGWidgetBlueprintAction::ExecuteInternal(const T
 
 	// Register and compile
 	FAssetRegistryModule::AssetCreated(WidgetBlueprint);
+	SyncWidgetVariableGuids(WidgetBlueprint);
 	FKismetEditorUtilities::CompileBlueprint(WidgetBlueprint);
 
 	// Save immediately
@@ -335,6 +387,7 @@ TSharedPtr<FJsonObject> FAddTextBlockToWidgetAction::ExecuteInternal(const TShar
 	TextBlock->bIsVariable = true;
 
 	// Compile and save
+	SyncWidgetVariableGuids(WidgetBlueprint);
 	FKismetEditorUtilities::CompileBlueprint(WidgetBlueprint);
 	UEditorAssetLibrary::SaveAsset(WidgetBlueprint->GetPathName(), false);
 
@@ -404,8 +457,13 @@ TSharedPtr<FJsonObject> FAddWidgetToWidgetAction::ExecuteInternal(const TSharedP
 	Params->TryGetStringField(TEXT("name"), NewName);
 	if (Old && Old->GetFName() == FName(*NewName))
 	{
-		// Free the name for the new widget
-		Old->Rename(*MakeUniqueObjectName(Tree, Old->GetClass(), FName(*(NewName + TEXT("_Replaced")))).ToString(), nullptr, REN_DontCreateRedirectors | REN_NonTransactional);
+		// Free the name for the new widget; move its GUID entry first so the compiler never sees a missing/stale one
+		const FName RenamedName = MakeUniqueObjectName(Tree, Old->GetClass(), FName(*(NewName + TEXT("_Replaced"))));
+		if (WidgetBlueprint->WidgetVariableNameToGuidMap.Contains(Old->GetFName()))
+		{
+			WidgetBlueprint->OnVariableRenamed(Old->GetFName(), RenamedName);
+		}
+		Old->Rename(*RenamedName.ToString(), nullptr, REN_DontCreateRedirectors | REN_NonTransactional);
 	}
 	else if (Tree->FindWidget(FName(*NewName)))
 	{
@@ -438,6 +496,7 @@ TSharedPtr<FJsonObject> FAddWidgetToWidgetAction::ExecuteInternal(const TSharedP
 	{
 		UPanelWidget* OldParent = Old->GetParent();
 		OldParent->ReplaceChild(Old, NewWidget);
+		WidgetBlueprint->OnVariableRemoved(Old->GetFName());
 		Tree->RemoveWidget(Old);
 	}
 	else
@@ -486,6 +545,7 @@ TSharedPtr<FJsonObject> FAddWidgetToWidgetAction::ExecuteInternal(const TSharedP
 	Params->TryGetBoolField(TEXT("is_variable"), bIsVariable);
 	NewWidget->bIsVariable = bIsVariable;
 
+	SyncWidgetVariableGuids(WidgetBlueprint);
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WidgetBlueprint);
 	FKismetEditorUtilities::CompileBlueprint(WidgetBlueprint);
 	UEditorAssetLibrary::SaveAsset(WidgetBlueprint->GetPathName(), false);
@@ -582,6 +642,7 @@ TSharedPtr<FJsonObject> FAddButtonToWidgetAction::ExecuteInternal(const TSharedP
 	}
 
 	// Compile and save
+	SyncWidgetVariableGuids(WidgetBlueprint);
 	FKismetEditorUtilities::CompileBlueprint(WidgetBlueprint);
 	UEditorAssetLibrary::SaveAsset(WidgetBlueprint->GetPathName(), false);
 
@@ -644,6 +705,7 @@ static void ApplyCanvasSlotLayout(UPanelSlot* Slot, const TSharedPtr<FJsonObject
 
 static void CompileAndSaveWidgetBlueprint(UWidgetBlueprint* WidgetBlueprint)
 {
+	SyncWidgetVariableGuids(WidgetBlueprint);
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WidgetBlueprint);
 	FKismetEditorUtilities::CompileBlueprint(WidgetBlueprint);
 	UEditorAssetLibrary::SaveAsset(WidgetBlueprint->GetPathName(), false);
@@ -933,6 +995,72 @@ TSharedPtr<FJsonObject> FRemoveWidgetAction::ExecuteInternal(const TSharedPtr<FJ
 }
 
 // =============================================================================
+// FMoveWidgetAction
+// =============================================================================
+
+bool FMoveWidgetAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	if (!Params->HasField(TEXT("widget_name")) || !Params->HasField(TEXT("target_widget")))
+	{
+		OutError = TEXT("Missing 'widget_name' or 'target_widget' parameter");
+		return false;
+	}
+	return true;
+}
+
+TSharedPtr<FJsonObject> FMoveWidgetAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	FString BlueprintName = Params->GetStringField(TEXT("widget_name"));
+	FString TargetName = Params->GetStringField(TEXT("target_widget"));
+	FString ParentName = Params->HasField(TEXT("parent_name")) ? Params->GetStringField(TEXT("parent_name")) : FString();
+
+	UWidgetBlueprint* WidgetBlueprint = FindWidgetBlueprintByName(BlueprintName);
+	if (!WidgetBlueprint)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Widget Blueprint '%s' not found"), *BlueprintName));
+	}
+	UWidgetTree* Tree = WidgetBlueprint->WidgetTree;
+	UWidget* Target = Tree->FindWidget(FName(*TargetName));
+	if (!Target || Target == Tree->RootWidget)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Widget '%s' not found or is the root"), *TargetName));
+	}
+
+	UPanelWidget* OldParent = Target->GetParent();
+	UPanelWidget* NewParent = OldParent;
+	if (!ParentName.IsEmpty())
+	{
+		NewParent = Cast<UPanelWidget>(Tree->FindWidget(FName(*ParentName)));
+		if (!NewParent)
+		{
+			return FMCPCommonUtils::CreateErrorResponse(FString::Printf(TEXT("Parent panel '%s' not found"), *ParentName));
+		}
+	}
+	if (!OldParent || !NewParent)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(TEXT("Widget has no parent panel"));
+	}
+
+	Tree->Modify();
+	OldParent->Modify();
+	NewParent->Modify();
+
+	// Detach, then re-insert at the requested index (default: append)
+	OldParent->RemoveChild(Target);
+	int32 Index = Params->HasField(TEXT("index")) ? (int32)Params->GetNumberField(TEXT("index")) : NewParent->GetChildrenCount();
+	Index = FMath::Clamp(Index, 0, NewParent->GetChildrenCount());
+	NewParent->InsertChildAt(Index, Target);
+
+	CompileAndSaveWidgetBlueprint(WidgetBlueprint);
+
+	TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+	ResultObj->SetBoolField(TEXT("success"), true);
+	ResultObj->SetStringField(TEXT("parent"), NewParent->GetName());
+	ResultObj->SetNumberField(TEXT("index"), NewParent->GetChildIndex(Target));
+	return ResultObj;
+}
+
+// =============================================================================
 // FBindWidgetEventAction
 // =============================================================================
 
@@ -1040,9 +1168,30 @@ TSharedPtr<FJsonObject> FBindWidgetEventAction::ExecuteInternal(const TSharedPtr
 
 	// Create Component Bound Event node - this is the proper way to handle widget events
 	UK2Node_ComponentBoundEvent* EventNode = NewObject<UK2Node_ComponentBoundEvent>(EventGraph);
-	EventNode->ComponentPropertyName = FName(*WidgetComponentName);
-	EventNode->DelegatePropertyName = DelegateProp->GetFName();
-	EventNode->DelegateOwnerClass = Widget->GetClass();
+	// Same setup as the editor's "Add Event" menu: InitializeComponentBoundEventParams also fills EventReference and
+	// CustomFunctionName, without which the event is never bound at runtime (the node looks fine but does nothing).
+	// It needs the widget variable on the generated class, so compile first if the variable is not there yet.
+	FObjectProperty* ComponentProp = nullptr;
+	if (WidgetBlueprint->GeneratedClass)
+	{
+		ComponentProp = FindFProperty<FObjectProperty>(WidgetBlueprint->GeneratedClass, FName(*WidgetComponentName));
+	}
+	if (!ComponentProp)
+	{
+		SyncWidgetVariableGuids(WidgetBlueprint);
+	FKismetEditorUtilities::CompileBlueprint(WidgetBlueprint);
+		if (WidgetBlueprint->GeneratedClass)
+		{
+			ComponentProp = FindFProperty<FObjectProperty>(WidgetBlueprint->GeneratedClass, FName(*WidgetComponentName));
+		}
+	}
+	if (!ComponentProp)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(FString::Printf(
+			TEXT("Widget '%s' is not a variable of the Blueprint (enable 'Is Variable'), so its events cannot be bound"), *WidgetComponentName));
+	}
+
+	EventNode->InitializeComponentBoundEventParams(ComponentProp, DelegateProp);
 
 	EventGraph->AddNode(EventNode, false, false);
 	EventNode->CreateNewGuid();
@@ -1053,6 +1202,7 @@ TSharedPtr<FJsonObject> FBindWidgetEventAction::ExecuteInternal(const TSharedPtr
 	UE_LOG(LogTemp, Log, TEXT("Created Component Bound Event: %s.%s"), *WidgetComponentName, *EventName);
 
 	// Compile and save
+	SyncWidgetVariableGuids(WidgetBlueprint);
 	FKismetEditorUtilities::CompileBlueprint(WidgetBlueprint);
 	UEditorAssetLibrary::SaveAsset(WidgetBlueprint->GetPathName(), false);
 
@@ -1199,6 +1349,7 @@ TSharedPtr<FJsonObject> FSetTextBlockBindingAction::ExecuteInternal(const TShare
 
 	// Compile
 	WidgetBlueprint->MarkPackageDirty();
+	SyncWidgetVariableGuids(WidgetBlueprint);
 	FKismetEditorUtilities::CompileBlueprint(WidgetBlueprint);
 
 	TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();

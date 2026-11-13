@@ -89,6 +89,11 @@ This skill provides specialized knowledge for working with Unreal Engine Bluepri
 - `connect_blueprint_nodes` - Wire two nodes together (source_node_id, source_pin, target_node_id, target_pin); supports `graph_name`. Pass `connections` (array of those four fields) to wire many pins in ONE call: preferred over repeated calls, especially on Widget Blueprints. A partial failure reports how many were applied and which indices failed.
 - `set_node_pin_default` - Set default value; handles object pins by loading assets with StaticLoadObject
 
+### Plugin actions without a Python tool (call through `batch`)
+- `add_anim_slot_node` - Slot node in an Animation Blueprint's AnimGraph: `blueprint_name`, `graph_name` (default `AnimGraph`), `slot_name`. Pins `Source` / `Pose`; wire with `connect_blueprint_nodes`.
+- `rename_struct_member` - Rename a user struct member (`struct_path`, `old_name`, `new_name`); moves links/defaults of the orphaned split/Break/Make pins and recompiles the Blueprints using it (returns `migrated_pins`).
+- `add_blueprint_function_node` special `function_name`s: `MakeStruct` / `BreakStruct` (`target` = struct name) and `GetDataTableRow` (`target` = DataTable path). Make/Break pin names carry a GUID: read them with `raw:true`.
+
 ### Event Dispatchers
 - `add_event_dispatcher` - Create multicast delegate with optional parameters
 - `call_event_dispatcher` - Create broadcast node

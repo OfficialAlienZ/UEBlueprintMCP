@@ -7,6 +7,7 @@
 #include "Engine/SimpleConstructionScript.h"
 #include "Engine/SCS_Node.h"
 #include "WidgetBlueprint.h"
+#include "Animation/WidgetAnimation.h"
 #include "Blueprint/UserWidget.h"
 #include "Blueprint/WidgetTree.h"
 #include "Components/Widget.h"
@@ -773,6 +774,56 @@ TSharedPtr<FJsonObject> FSpawnBlueprintActorAction::ActorToJson(AActor* Actor) c
 }
 
 
+// The UMG compiler requires every widget of the tree (variable or not) to have an entry in WidgetVariableNameToGuidMap (normally kept by the
+// designer through OnVariableAdded/Removed). We set bIsVariable and add/remove widgets directly, so re-sync the map before compiling.
+static void SyncWidgetVariableGuids(UWidgetBlueprint* BP)
+{
+	if (!BP || !BP->WidgetTree)
+	{
+		return;
+	}
+	TSet<FName> VarNames;
+	BP->WidgetTree->ForEachWidget([&VarNames](UWidget* W)
+	{
+		if (W)
+		{
+			VarNames.Add(W->GetFName());
+		}
+	});
+	for (const FName& Name : VarNames)
+	{
+		if (!BP->WidgetVariableNameToGuidMap.Contains(Name))
+		{
+			BP->OnVariableAdded(Name);
+		}
+	}
+	TArray<FName> Stale;
+	for (const TPair<FName, FGuid>& Pair : BP->WidgetVariableNameToGuidMap)
+	{
+		if (VarNames.Contains(Pair.Key))
+		{
+			continue;
+		}
+		bool bIsAnimation = false;
+		for (UWidgetAnimation* Anim : BP->Animations)
+		{
+			if (Anim && Anim->GetFName() == Pair.Key)
+			{
+				bIsAnimation = true;
+				break;
+			}
+		}
+		if (!bIsAnimation)
+		{
+			Stale.Add(Pair.Key);
+		}
+	}
+	for (const FName& Name : Stale)
+	{
+		BP->OnVariableRemoved(Name);
+	}
+}
+
 // ============================================================================
 // FSetComponentPropertyAction
 // ============================================================================
@@ -815,15 +866,31 @@ TSharedPtr<FJsonObject> FSetComponentPropertyAction::ExecuteInternal(const TShar
 	UObject* ComponentTemplate = nullptr;
 	if (WidgetBlueprint)
 	{
-		UWidget* Widget = WidgetBlueprint->WidgetTree ? WidgetBlueprint->WidgetTree->FindWidget(FName(*ComponentName)) : nullptr;
+		// "Name.Slot" targets the widget's layout slot (Size, VerticalAlignment, LayoutData, ZOrder...)
+		FString WidgetName = ComponentName;
+		bool bTargetSlot = false;
+		if (WidgetName.EndsWith(TEXT(".Slot")))
+		{
+			WidgetName.LeftChopInline(5);
+			bTargetSlot = true;
+		}
+		UWidget* Widget = WidgetBlueprint->WidgetTree ? WidgetBlueprint->WidgetTree->FindWidget(FName(*WidgetName)) : nullptr;
 		if (!Widget)
 		{
 			return CreateErrorResponse(
-				FString::Printf(TEXT("Widget not found in '%s': %s"), *Blueprint->GetName(), *ComponentName),
+				FString::Printf(TEXT("Widget not found in '%s': %s"), *Blueprint->GetName(), *WidgetName),
 				TEXT("component_not_found")
 			);
 		}
 		ComponentTemplate = Widget;
+		if (bTargetSlot)
+		{
+			if (!Widget->Slot)
+			{
+				return CreateErrorResponse(FString::Printf(TEXT("Widget '%s' has no slot (root widget?)"), *WidgetName), TEXT("no_slot"));
+			}
+			ComponentTemplate = Widget->Slot;
+		}
 	}
 	else
 	{
@@ -859,6 +926,7 @@ TSharedPtr<FJsonObject> FSetComponentPropertyAction::ExecuteInternal(const TShar
 	// Is Variable adds/removes a member variable, so the Blueprint needs a structural update
 	if (WidgetBlueprint && PropertyName == TEXT("bIsVariable"))
 	{
+		SyncWidgetVariableGuids(WidgetBlueprint);
 		FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(Blueprint);
 	}
 

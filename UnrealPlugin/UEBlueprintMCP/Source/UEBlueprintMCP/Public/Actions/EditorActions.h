@@ -214,6 +214,18 @@ protected:
 	virtual bool BlocksDuringPIE() const override { return true; }
 };
 
+/** Rename a member of a user-defined (Blueprint) struct; nodes using it are refreshed by the engine */
+class UEBLUEPRINTMCP_API FRenameStructMemberAction : public FEditorAction
+{
+public:
+	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
+
+protected:
+	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
+	virtual FString GetActionName() const override { return TEXT("rename_struct_member"); }
+	virtual bool BlocksDuringPIE() const override { return true; }
+};
+
 class UEBLUEPRINTMCP_API FSaveAllAction : public FEditorAction
 {
 public:

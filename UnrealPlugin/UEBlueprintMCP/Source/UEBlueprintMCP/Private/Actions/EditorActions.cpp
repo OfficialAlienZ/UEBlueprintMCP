@@ -19,6 +19,14 @@
 #include "FileHelpers.h"
 #include "UObject/SavePackage.h"
 #include "AssetToolsModule.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "K2Node.h"
+#include "EdGraph/EdGraph.h"
+#include "Kismet2/KismetEditorUtilities.h"
+#include "Engine/Blueprint.h"
+#include "Kismet2/StructureEditorUtils.h"
+#include "StructUtils/UserDefinedStruct.h"
+#include "UserDefinedStructure/UserDefinedStructEditorData.h"
 #include "Misc/PackageName.h"
 
 
@@ -887,5 +895,122 @@ TSharedPtr<FJsonObject> FDuplicateAssetAction::ExecuteInternal(const TSharedPtr<
 	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetStringField(TEXT("path"), Copy->GetPathName());
 	Result->SetStringField(TEXT("class"), Copy->GetClass()->GetName());
+	return CreateSuccessResponse(Result);
+}
+
+
+// =========================================================================
+// FRenameStructMemberAction
+// =========================================================================
+
+bool FRenameStructMemberAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	FString Value;
+	return GetRequiredString(Params, TEXT("struct_path"), Value, OutError)
+		&& GetRequiredString(Params, TEXT("old_name"), Value, OutError)
+		&& GetRequiredString(Params, TEXT("new_name"), Value, OutError);
+}
+
+TSharedPtr<FJsonObject> FRenameStructMemberAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	const FString StructPath = Params->GetStringField(TEXT("struct_path"));
+	const FString OldName = Params->GetStringField(TEXT("old_name"));
+	const FString NewName = Params->GetStringField(TEXT("new_name"));
+
+	UUserDefinedStruct* Struct = LoadObject<UUserDefinedStruct>(nullptr, *StructPath);
+	if (!Struct)
+	{
+		return CreateErrorResponse(FString::Printf(TEXT("User defined struct not found: %s"), *StructPath), TEXT("not_found"));
+	}
+
+	FGuid VarGuid;
+	FString OldVar;
+	for (const FStructVariableDescription& Var : FStructureEditorUtils::GetVarDesc(Struct))
+	{
+		if (Var.VarName.ToString() == OldName || Var.FriendlyName == OldName)
+		{
+			VarGuid = Var.VarGuid;
+			OldVar = Var.VarName.ToString();
+			break;
+		}
+	}
+	if (!VarGuid.IsValid())
+	{
+		return CreateErrorResponse(FString::Printf(TEXT("Member not found: %s"), *OldName), TEXT("not_found"));
+	}
+	if (!FStructureEditorUtils::RenameVariable(Struct, VarGuid, NewName))
+	{
+		return CreateErrorResponse(FString::Printf(TEXT("Could not rename %s to %s (name in use or invalid)"), *OldName, *NewName), TEXT("rename_failed"));
+	}
+	FString NewVar;
+	for (const FStructVariableDescription& Var : FStructureEditorUtils::GetVarDesc(Struct))
+	{
+		if (Var.VarGuid == VarGuid) { NewVar = Var.VarName.ToString(); break; }
+	}
+
+	// The engine gives the member a new internal name, which orphans split/struct pins (e.g. "stats_healthRegen_18_GUID")
+	// in every Blueprint using the struct. Move links and defaults from each orphan pin to its renamed counterpart.
+	int32 MigratedPins = 0;
+	TArray<UBlueprint*> TouchedBlueprints;
+	if (!NewVar.IsEmpty() && NewVar != OldVar)
+	{
+		IAssetRegistry& AR = FModuleManager::LoadModuleChecked<FAssetRegistryModule>(TEXT("AssetRegistry")).Get();
+		TArray<FName> Referencers;
+		AR.GetReferencers(Struct->GetOutermost()->GetFName(), Referencers);
+		for (const FName& RefName : Referencers)
+		{
+			UPackage* Pkg = LoadPackage(nullptr, *RefName.ToString(), LOAD_None);
+			if (!Pkg) continue;
+			TArray<UK2Node*> Nodes;
+			ForEachObjectWithPackage(Pkg, [&Nodes](UObject* Obj)
+			{
+				if (UK2Node* Node = Cast<UK2Node>(Obj)) Nodes.Add(Node);
+				return true;
+			});
+			bool bPackageTouched = false;
+			for (UK2Node* Node : Nodes)
+			{
+				TArray<UEdGraphPin*> Orphans;
+				for (UEdGraphPin* Pin : Node->Pins)
+				{
+					if (Pin && Pin->PinName.ToString().Contains(OldVar)) Orphans.Add(Pin);
+				}
+				for (UEdGraphPin* OldPin : Orphans)
+				{
+					const FName NewPinName(*OldPin->PinName.ToString().Replace(*OldVar, *NewVar));
+					UEdGraphPin* NewPin = Node->FindPin(NewPinName, OldPin->Direction);
+					if (!NewPin || NewPin == OldPin) continue;
+					TArray<UEdGraphPin*> Links = OldPin->LinkedTo;
+					for (UEdGraphPin* Other : Links) NewPin->MakeLinkTo(Other);
+					NewPin->DefaultValue = OldPin->DefaultValue;
+					NewPin->DefaultObject = OldPin->DefaultObject;
+					NewPin->DefaultTextValue = OldPin->DefaultTextValue;
+					if (OldPin->ParentPin) OldPin->ParentPin->SubPins.Remove(OldPin);
+					OldPin->BreakAllPinLinks();
+					Node->RemovePin(OldPin);
+					++MigratedPins;
+					bPackageTouched = true;
+				}
+			}
+			if (bPackageTouched)
+			{
+				if (UBlueprint* BP = FindObject<UBlueprint>(Pkg, *FPackageName::GetShortName(RefName)))
+				{
+					TouchedBlueprints.Add(BP);
+				}
+				Context.MarkPackageDirty(Pkg);
+			}
+		}
+		for (UBlueprint* BP : TouchedBlueprints)
+		{
+			FKismetEditorUtilities::CompileBlueprint(BP);
+		}
+	}
+	Context.MarkPackageDirty(Struct->GetOutermost());
+
+	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("struct"), Struct->GetPathName());
+	Result->SetStringField(TEXT("new_name"), NewName);
+	Result->SetNumberField(TEXT("migrated_pins"), MigratedPins);
 	return CreateSuccessResponse(Result);
 }

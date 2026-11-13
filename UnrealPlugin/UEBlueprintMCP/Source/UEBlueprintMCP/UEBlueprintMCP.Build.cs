@@ -55,6 +55,8 @@ public class UEBlueprintMCP : ModuleRules
 			"BlueprintGraph",
 			"Kismet",
 			"KismetCompiler",
+			"AnimGraph",          // For UAnimGraphNode_Slot (add_anim_slot_node)
+			"AnimGraphRuntime",
 			"GraphEditor",
 			"Json",
 			"JsonUtilities",
@@ -64,6 +66,7 @@ public class UEBlueprintMCP : ModuleRules
 			"UMGEditor",
 			"EditorScriptingUtilities",
 			"AssetTools",
+			"AssetRegistry",
 			"MaterialEditor",     // For UMaterialEditingLibrary and material expression manipulation
 			"RenderCore",         // For material shader compilation
 			"RHI",                // GMaxRHIShaderPlatform (compile_material errors)
