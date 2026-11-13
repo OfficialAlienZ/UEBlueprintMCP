@@ -162,6 +162,30 @@ def get_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="set_data_table_row",
+            description=(
+                "Edit a Data Table row (counterpart of get_data_table_info): update some columns, add a row or "
+                "delete it. Only the columns listed in 'values' change. Column names are the authored names "
+                "returned by get_data_table_info. Text/String columns take a JSON string (Text gets a proper "
+                "localization key), numbers/bools their JSON type, enums an entry name or display name, "
+                "structs a (partial) nested object, arrays a JSON array that replaces the array. Values are "
+                "validated on a copy first, so a failing column leaves the row untouched. For a Composite Data "
+                "Table the row is edited in the parent table that stores it (reported as 'edited_table'); "
+                "new rows must target a parent table directly. Rejected while PIE runs."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "table_name": {"type": "string", "description": "Data Table name or full path (e.g. /Game/Data/CDT_SCPNItems)"},
+                    "row_name": {"type": "string", "description": "Row to edit"},
+                    "values": {"type": "object", "description": "Column name -> new value, e.g. {\"DisplayName\": \"Adrenaline Shot\"}"},
+                    "create_if_missing": {"type": "boolean", "description": "Add the row (default values + 'values') when it does not exist (default false)"},
+                    "delete_row": {"type": "boolean", "description": "Remove the row instead of editing it (default false)"}
+                },
+                "required": ["table_name", "row_name"]
+            }
+        ),
+        Tool(
             name="get_object_properties",
             description=(
                 "Read-only export of EVERY reflected property (UPROPERTY) of an object as Export Text, like the "
@@ -266,14 +290,28 @@ def get_tools() -> list[Tool]:
         ),
         Tool(
             name="set_component_property",
-            description="Set a property on a component in a Blueprint, or on a widget in a Widget Blueprint (component_name = widget name). For widgets, property_name 'bIsVariable' with value 'true' ticks 'Is Variable' in the Designer so graphs can reference the widget.",
+            description=(
+                "Set a property on a component in a Blueprint, or on a widget in a Widget Blueprint "
+                "(component_name = widget name). For widgets this is the Designer Details panel: PREFER it over "
+                "variables + Set nodes in Construct for any static value (Text, ColorAndOpacity, Font.Size, "
+                "Justification, Visibility, RenderTransform.Scale/Translation/Angle, RenderTransformPivot, "
+                "Slot.Padding, Slot.LayoutData.*, Brush.ResourceObject...). property_name may be a dotted path through "
+                "nested structs and sub-objects (e.g. 'RenderTransform.Scale', 'Font.Size', 'Slot.LayoutData.Offsets'). "
+                "Use set_text_block_binding for values that change at runtime. property_name 'bIsVariable' with value "
+                "'true' ticks 'Is Variable' (only needed when a graph must reference the widget). Value formats: "
+                "bool/number/string/enum name; Text and Name as a string; Vector/Rotator/Vector2D as [x, y, (z)]; "
+                "FMargin as [L, T, R, B]; FLinearColor and FSlateColor (e.g. TextBlock ColorAndOpacity) as [R, G, B] or "
+                "[R, G, B, A] with 0..1 channels (a JSON string such as \"[1,0,0,1]\" also works); asset references "
+                "(Font.FontObject, Brush.ResourceObject) as an asset path, empty string clears; other structs as a JSON "
+                "object or as Unreal export text, e.g. \"(R=1,G=0,B=0,A=1)\"."
+            ),
             inputSchema={
                 "type": "object",
                 "properties": {
                     "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
                     "component_name": {"type": "string", "description": "Name of the component"},
                     "property_name": {"type": "string", "description": "Name of the property"},
-                    "property_value": {"type": "string", "description": "Value to set"}
+                    "property_value": {"type": ["string", "number", "boolean", "array", "object"], "description": "Value to set (see tool description for formats)"}
                 },
                 "required": ["blueprint_name", "component_name", "property_name", "property_value"]
             }
@@ -364,6 +402,7 @@ TOOL_HANDLERS = {
     "get_enum_info": "get_enum_info",
     "get_curve_info": "get_curve_info",
     "get_data_table_info": "get_data_table_info",
+    "set_data_table_row": "set_data_table_row",
     "get_object_properties": "get_object_properties",
     "get_project_config": "get_project_config",
     "set_blueprint_property": "set_blueprint_property",

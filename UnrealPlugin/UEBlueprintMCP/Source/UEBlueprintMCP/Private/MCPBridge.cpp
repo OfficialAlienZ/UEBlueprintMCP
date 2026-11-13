@@ -8,12 +8,15 @@
 #include "Actions/InspectionActions.h"
 #include "Actions/AIActions.h"
 #include "Actions/AssetInspectionActions.h"
+#include "Actions/DataTableActions.h"
 #include "Actions/SearchActions.h"
 #include "Actions/ObjectInspectionActions.h"
 #include "Actions/PIEActions.h"
 #include "Actions/GameplayActions.h"
 #include "Actions/ObserveActions.h"
 #include "Actions/AutomationActions.h"
+#include "Actions/PerformanceActions.h"
+#include "Actions/OptimizationActions.h"
 #include "MCPLogCapture.h"
 #include "Actions/NodeActions.h"
 #include "Actions/ProjectActions.h"
@@ -104,8 +107,10 @@ void UMCPBridge::RegisterActions()
 	ActionHandlers.Add(TEXT("get_enum_info"), MakeShared<FGetEnumInfoAction>());
 	ActionHandlers.Add(TEXT("get_curve_info"), MakeShared<FGetCurveInfoAction>());
 	ActionHandlers.Add(TEXT("get_data_table_info"), MakeShared<FGetDataTableInfoAction>());
+	ActionHandlers.Add(TEXT("get_asset_timestamps"), MakeShared<FGetAssetTimestampsAction>());
 	ActionHandlers.Add(TEXT("get_object_properties"), MakeShared<FGetObjectPropertiesAction>());
 	ActionHandlers.Add(TEXT("get_project_config"), MakeShared<FGetProjectConfigAction>());
+	ActionHandlers.Add(TEXT("set_data_table_row"), MakeShared<FSetDataTableRowAction>());
 
 	// =========================================================================
 	// Editor Actions (actors, viewport, save)
@@ -142,6 +147,16 @@ void UMCPBridge::RegisterActions()
 	ActionHandlers.Add(TEXT("list_automation_tests"), MakeShared<FListAutomationTestsAction>());
 	ActionHandlers.Add(TEXT("run_automation_tests"), MakeShared<FRunAutomationTestsAction>());
 	ActionHandlers.Add(TEXT("get_automation_results"), MakeShared<FGetAutomationResultsAction>());
+
+	// Performance analysis and optimization
+	ActionHandlers.Add(TEXT("get_performance_stats"), MakeShared<FGetPerformanceStatsAction>());
+	ActionHandlers.Add(TEXT("audit_assets"), MakeShared<FAuditAssetsAction>());
+	ActionHandlers.Add(TEXT("audit_level"), MakeShared<FAuditLevelAction>());
+	ActionHandlers.Add(TEXT("optimize_static_mesh"), MakeShared<FOptimizeStaticMeshAction>());
+	ActionHandlers.Add(TEXT("optimize_texture"), MakeShared<FOptimizeTextureAction>());
+	ActionHandlers.Add(TEXT("set_project_config"), MakeShared<FSetProjectConfigAction>());
+	ActionHandlers.Add(TEXT("manage_level_streaming"), MakeShared<FManageLevelStreamingAction>());
+	ActionHandlers.Add(TEXT("build_level"), MakeShared<FBuildLevelAction>());
 
 	// =========================================================================
 	// Node Actions - Graph Operations
@@ -182,6 +197,7 @@ void UMCPBridge::RegisterActions()
 	ActionHandlers.Add(TEXT("add_blueprint_branch_node"), MakeShared<FAddBlueprintBranchNodeAction>());
 	ActionHandlers.Add(TEXT("add_anim_slot_node"), MakeShared<FAddAnimSlotNodeAction>());
 	ActionHandlers.Add(TEXT("add_blueprint_cast_node"), MakeShared<FAddBlueprintCastNodeAction>());
+	ActionHandlers.Add(TEXT("add_array_get_node"), MakeShared<FAddArrayGetNodeAction>());
 	ActionHandlers.Add(TEXT("add_blueprint_get_subsystem_node"), MakeShared<FAddBlueprintGetSubsystemNodeAction>());
 
 	// =========================================================================

@@ -74,3 +74,27 @@ protected:
 	virtual FString GetActionName() const override { return TEXT("get_data_table_info"); }
 	virtual bool RequiresSave() const override { return false; }
 };
+
+/**
+ * FGetAssetTimestampsAction
+ *
+ * Read-only: last-modified time of the .uasset/.umap files on disk, in UTC (timezone independent),
+ * used to detect documentation that is older than the asset it describes. Does not load assets.
+ *
+ * Parameters:
+ *   - assets: Array of asset names or paths (/Game/Folder/BP_Name, optionally with .ObjectName or a
+ *       'level:' prefix). A plain name is looked up in the Asset Registry (ambiguous names are reported).
+ *
+ * Returns per asset: found, package, file, modified_utc (ISO 8601, 'Z'), modified_epoch (unix seconds)
+ * and dirty (unsaved edits in the open editor, so the file on disk is older than what the editor shows).
+ */
+class UEBLUEPRINTMCP_API FGetAssetTimestampsAction : public FEditorAction
+{
+public:
+	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
+
+protected:
+	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
+	virtual FString GetActionName() const override { return TEXT("get_asset_timestamps"); }
+	virtual bool RequiresSave() const override { return false; }
+};

@@ -53,6 +53,16 @@ namespace MCPCompat
 #endif
 	}
 
+	/** Import a property value from Unreal export text, e.g. "(R=1,G=0,B=0,A=1)". Returns true if the text was parsed. */
+	inline bool ImportPropertyText(const FProperty* Property, const FString& Text, void* ValuePtr, UObject* Owner)
+	{
+#if ENGINE_MAJOR_VERSION > 5 || (ENGINE_MAJOR_VERSION == 5 && ENGINE_MINOR_VERSION >= 1)
+		return Property->ImportText_Direct(*Text, ValuePtr, Owner, PPF_None) != nullptr;
+#else
+		return Property->ImportText(*Text, ValuePtr, PPF_None, Owner) != nullptr;
+#endif
+	}
+
 	/** Save a package to disk. Returns true on success. */
 	inline bool SavePackageToDisk(UPackage* Package, UObject* Asset, const FString& Filename, EObjectFlags TopLevelFlags)
 	{

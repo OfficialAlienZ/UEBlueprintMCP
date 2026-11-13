@@ -69,7 +69,7 @@ public class UEBlueprintMCP : ModuleRules
 			"AssetRegistry",
 			"MaterialEditor",     // For UMaterialEditingLibrary and material expression manipulation
 			"RenderCore",         // For material shader compilation
-			"RHI",                // GMaxRHIShaderPlatform (compile_material errors)
+			"RHI",                // GMaxRHIShaderPlatform (compile_material errors), RHIGetTextureMemoryStats (get_performance_stats)
 			"AIModule",           // For Behavior Tree / Blackboard introspection
 			"GameplayTasks",      // Required by AIModule headers
 			"ImageWrapper",       // PNG encoding for take_screenshot

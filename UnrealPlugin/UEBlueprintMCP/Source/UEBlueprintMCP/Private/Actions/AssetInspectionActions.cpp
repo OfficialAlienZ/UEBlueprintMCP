@@ -13,6 +13,11 @@
 #include "Engine/CompositeDataTable.h"
 #include "Engine/UserDefinedEnum.h"
 #include "UObject/UnrealType.h"
+#include "UObject/Package.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "HAL/FileManager.h"
+#include "Misc/DateTime.h"
+#include "Misc/PackageName.h"
 
 namespace
 {
@@ -311,5 +316,167 @@ TSharedPtr<FJsonObject> FGetDataTableInfoAction::ExecuteInternal(const TSharedPt
 		Result->SetBoolField(TEXT("truncated"), true);
 		Result->SetNumberField(TEXT("next_offset"), Offset + Rows.Num());
 	}
+	return CreateSuccessResponse(Result);
+}
+
+// ============================================================================
+// get_asset_timestamps
+// ============================================================================
+
+namespace
+{
+	constexpr int32 AssetTimestamps_MaxAssets = 500;
+
+	FString AssetTimestamps_StripPrefix(const FString& Input)
+	{
+		FString Value = Input.TrimStartAndEnd();
+		if (Value.StartsWith(TEXT("level:")))
+		{
+			Value = Value.Mid(6).TrimStartAndEnd();
+		}
+		return Value;
+	}
+
+	// "/Game/Folder/BP_X.BP_X_C" -> "/Game/Folder/BP_X"
+	FString AssetTimestamps_ToPackageName(const FString& Path)
+	{
+		FString PackageName = Path;
+		int32 DotIndex = INDEX_NONE;
+		if (PackageName.FindChar(TEXT('.'), DotIndex))
+		{
+			PackageName.LeftInline(DotIndex);
+		}
+		return PackageName;
+	}
+}
+
+bool FGetAssetTimestampsAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	const TArray<TSharedPtr<FJsonValue>>* Assets = nullptr;
+	if (!Params->TryGetArrayField(TEXT("assets"), Assets) || !Assets || Assets->Num() == 0)
+	{
+		OutError = TEXT("Missing or empty 'assets'. Pass an array of asset names or paths, e.g. [\"/Game/Blueprints/BP_Enemy\"].");
+		return false;
+	}
+	if (Assets->Num() > AssetTimestamps_MaxAssets)
+	{
+		OutError = FString::Printf(TEXT("Too many assets (%d). Maximum is %d per call."), Assets->Num(), AssetTimestamps_MaxAssets);
+		return false;
+	}
+	for (const TSharedPtr<FJsonValue>& Value : *Assets)
+	{
+		FString Name;
+		if (!Value.IsValid() || !Value->TryGetString(Name) || Name.TrimStartAndEnd().IsEmpty())
+		{
+			OutError = TEXT("'assets' must contain non-empty strings.");
+			return false;
+		}
+	}
+	return true;
+}
+
+TSharedPtr<FJsonObject> FGetAssetTimestampsAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	const TArray<TSharedPtr<FJsonValue>>* Assets = nullptr;
+	Params->TryGetArrayField(TEXT("assets"), Assets);
+
+	// Asset name -> package names, built lazily (only needed for plain names).
+	TMap<FString, TArray<FString>> PackagesByAssetName;
+	bool bRegistryBuilt = false;
+	auto EnsureRegistry = [&]()
+	{
+		if (bRegistryBuilt)
+		{
+			return;
+		}
+		bRegistryBuilt = true;
+		FAssetRegistryModule& AssetRegistryModule = FModuleManager::LoadModuleChecked<FAssetRegistryModule>("AssetRegistry");
+		TArray<FAssetData> AllAssets;
+		AssetRegistryModule.Get().GetAllAssets(AllAssets);
+		for (const FAssetData& AssetData : AllAssets)
+		{
+			PackagesByAssetName.FindOrAdd(AssetData.AssetName.ToString()).AddUnique(AssetData.PackageName.ToString());
+		}
+	};
+
+	AssetInspect_FJsonArray Items;
+	for (const TSharedPtr<FJsonValue>& Value : *Assets)
+	{
+		const FString Input = Value->AsString();
+		const FString Cleaned = AssetTimestamps_StripPrefix(Input);
+
+		TSharedPtr<FJsonObject> Item = MakeShared<FJsonObject>();
+		Item->SetStringField(TEXT("input"), Input);
+
+		FString PackageName;
+		if (Cleaned.StartsWith(TEXT("/")))
+		{
+			PackageName = AssetTimestamps_ToPackageName(Cleaned);
+		}
+		else
+		{
+			EnsureRegistry();
+			const TArray<FString>* Candidates = PackagesByAssetName.Find(Cleaned);
+			if (!Candidates || Candidates->Num() == 0)
+			{
+				Item->SetBoolField(TEXT("found"), false);
+				Item->SetStringField(TEXT("error"), FString::Printf(TEXT("Asset '%s' not found in the Asset Registry. Pass the full path (e.g. /Game/Folder/%s)."), *Cleaned, *Cleaned));
+				Items.Add(AssetInspect_AsValue(Item));
+				continue;
+			}
+			if (Candidates->Num() > 1)
+			{
+				AssetInspect_FJsonArray CandidateValues;
+				for (const FString& Candidate : *Candidates)
+				{
+					CandidateValues.Add(MakeShared<FJsonValueString>(Candidate));
+				}
+				Item->SetBoolField(TEXT("found"), false);
+				Item->SetStringField(TEXT("error"), FString::Printf(TEXT("Asset name '%s' is ambiguous. Pass one of the candidate paths."), *Cleaned));
+				Item->SetArrayField(TEXT("candidates"), CandidateValues);
+				Items.Add(AssetInspect_AsValue(Item));
+				continue;
+			}
+			PackageName = (*Candidates)[0];
+		}
+
+		Item->SetStringField(TEXT("package"), PackageName);
+
+		const UPackage* LoadedPackage = FindPackage(nullptr, *PackageName);
+		Item->SetBoolField(TEXT("dirty"), LoadedPackage && LoadedPackage->IsDirty());
+
+		FString Filename;
+		const FString Extensions[] = { FPackageName::GetAssetPackageExtension(), FPackageName::GetMapPackageExtension() };
+		for (const FString& Extension : Extensions)
+		{
+			const FString Candidate = FPackageName::LongPackageNameToFilename(PackageName, Extension);
+			if (IFileManager::Get().FileExists(*Candidate))
+			{
+				Filename = Candidate;
+				break;
+			}
+		}
+
+		if (Filename.IsEmpty())
+		{
+			Item->SetBoolField(TEXT("found"), false);
+			Item->SetStringField(TEXT("error"), FString::Printf(TEXT("No .uasset/.umap on disk for package '%s' (never saved, or the path is wrong)."), *PackageName));
+			Items.Add(AssetInspect_AsValue(Item));
+			continue;
+		}
+
+		// IFileManager::GetTimeStamp is UTC on every platform.
+		const FDateTime Modified = IFileManager::Get().GetTimeStamp(*Filename);
+		Item->SetBoolField(TEXT("found"), true);
+		Item->SetStringField(TEXT("file"), FPaths::ConvertRelativePathToFull(Filename));
+		Item->SetStringField(TEXT("modified_utc"), Modified.ToIso8601());
+		Item->SetNumberField(TEXT("modified_epoch"), static_cast<double>(Modified.ToUnixTimestamp()) + Modified.GetMillisecond() / 1000.0);
+		Items.Add(AssetInspect_AsValue(Item));
+	}
+
+	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("server_time_utc"), FDateTime::UtcNow().ToIso8601());
+	Result->SetNumberField(TEXT("count"), Items.Num());
+	Result->SetArrayField(TEXT("assets"), Items);
 	return CreateSuccessResponse(Result);
 }

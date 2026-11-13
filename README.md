@@ -24,6 +24,7 @@ A Model Context Protocol (MCP) server for AI-assisted Unreal Engine 4.27 / 5.x B
 | **Graph reading** | `get_graph_connections`: a whole graph in one compact call (numbered nodes, `3.then>7.execute` links, unlinked input defaults, list of graphs) |
 | **Batching** | `batch`: several commands in one call; `"$N.field"` uses a field of command N's result (e.g. `"$0.node_id"`) |
 | **Validated Get** | `convert_to_validated_get`: variable Get to Validated Get (objects) / Branch (bools), or back to pure (UE 5.x) |
+| **Performance** | Profile (CSV, GPU, stats, memory), audit assets/levels, optimise textures/meshes/config/streaming, build lighting/navmesh/HLOD, profile packaged builds |
 
 Several clients can be connected at the same time (e.g. the MCP server and a script); commands still run one at a time on the game thread.
 
@@ -89,6 +90,7 @@ All editor operations flow through `FEditorAction` subclasses that provide:
 
 - **[CLAUDE.md](CLAUDE.md)** - Architecture details and contribution guidelines
 - **[docs/SKILL.md](docs/SKILL.md)** - Full command reference for Claude Code
+- **[docs/OPTIMIZE.md](docs/OPTIMIZE.md)** - Performance workflow: measure, find the bottleneck, audit, fix, re-measure
 
 ## Requirements
 

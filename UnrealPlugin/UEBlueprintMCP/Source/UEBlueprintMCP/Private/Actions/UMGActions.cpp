@@ -25,7 +25,6 @@
 #include "K2Node_ComponentBoundEvent.h"
 #include "Kismet2/KismetEditorUtilities.h"
 
-// Helper to find widget blueprint in common paths
 // The UMG compiler requires every widget of the tree (variable or not) to have an entry in WidgetVariableNameToGuidMap (normally kept by the
 // designer through OnVariableAdded/Removed). We set bIsVariable and add/remove widgets directly, so re-sync the map before compiling.
 static void SyncWidgetVariableGuids(UWidgetBlueprint* BP)
@@ -76,7 +75,13 @@ static void SyncWidgetVariableGuids(UWidgetBlueprint* BP)
 	}
 }
 
-static UWidgetBlueprint* FindWidgetBlueprintByName(const FString& BlueprintName)
+// Helper to find widget blueprint in common paths (declared in UMGActions.h)
+void MCPSyncWidgetVariableGuids(UWidgetBlueprint* BP)
+{
+	SyncWidgetVariableGuids(BP);
+}
+
+UWidgetBlueprint* FindWidgetBlueprintByName(const FString& BlueprintName)
 {
 	TArray<FString> SearchPaths = {
 		FString::Printf(TEXT("/Game/UI/%s"), *BlueprintName),
@@ -132,7 +137,6 @@ TSharedPtr<FJsonObject> FCreateUMGWidgetBlueprintAction::ExecuteInternal(const T
 			PackagePath += TEXT("/");
 		}
 	}
-
 	FString AssetName = BlueprintName;
 	FString FullPath = PackagePath + AssetName;
 
@@ -1256,8 +1260,6 @@ TSharedPtr<FJsonObject> FAddWidgetToViewportAction::ExecuteInternal(const TShare
 	ResultObj->SetStringField(TEXT("note"), TEXT("Widget class ready. Use CreateWidget and AddToViewport nodes in Blueprint."));
 	return ResultObj;
 }
-
-// =============================================================================
 // FSetTextBlockBindingAction
 // =============================================================================
 
@@ -1357,3 +1359,4 @@ TSharedPtr<FJsonObject> FSetTextBlockBindingAction::ExecuteInternal(const TShare
 	ResultObj->SetStringField(TEXT("binding_name"), BindingName);
 	return ResultObj;
 }
+=======

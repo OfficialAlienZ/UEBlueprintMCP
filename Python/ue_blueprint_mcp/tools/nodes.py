@@ -46,7 +46,7 @@ def get_tools() -> list[Tool]:
         ),
         Tool(
             name="add_blueprint_custom_event",
-            description="Add a Custom Event node with optional parameters.",
+            description="Add a Custom Event node with optional parameters and replication flags. If an event with this name already exists in the graph and replication/reliable is given, its flags are updated instead of creating a duplicate.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -57,7 +57,10 @@ def get_tools() -> list[Tool]:
                         "type": "array",
                         "items": {"type": "object"},
                         "description": "Parameters with 'name' and 'type' keys (Float, Boolean, Integer, Vector, String)"
-                    }
+                    },
+                    "replication": {"type": "string", "enum": ["none", "server", "client", "multicast"], "description": "Replication mode: server = Run on Server, client = Run on owning Client, multicast = Multicast"},
+                    "reliable": {"type": "boolean", "description": "Reliable replication (only meaningful with replication server/client/multicast)"},
+                    "graph_name": {"type": "string", "description": "Graph to use (default: event graph)"}
                 },
                 "required": ["blueprint_name", "event_name"]
             }
@@ -366,6 +369,23 @@ def get_tools() -> list[Tool]:
             }
         ),
 
+        Tool(
+            name="add_array_get_node",
+            description=(
+                "Add an array Get node (GET a copy). Pins: TargetArray (input array; connecting it sets the element type), "
+                "Dimension (index), Output (element). Wire TargetArray first so Output takes the element type."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
+                    "graph_name": {"type": "string", "description": "Optional function graph name (defaults to event graph)"},
+                    "node_position": {"type": "array", "items": {"type": "number"}, "description": "[X, Y] position. Omit to auto-place (nodes added without it are laid out left to right and re-flowed when wired)"}
+                },
+                "required": ["blueprint_name"]
+            }
+        ),
+
         # =====================================================================
         # Flow Control
         # =====================================================================
@@ -625,6 +645,7 @@ TOOL_HANDLERS = {
     "add_blueprint_get_self_component_reference": "add_blueprint_get_self_component_reference",
     "add_blueprint_self_reference": "add_blueprint_self_reference",
     "add_blueprint_cast_node": "add_blueprint_cast_node",
+    "add_array_get_node": "add_array_get_node",
     # Flow Control
     "add_blueprint_branch_node": "add_blueprint_branch_node",
     "add_macro_instance_node": "add_macro_instance_node",
