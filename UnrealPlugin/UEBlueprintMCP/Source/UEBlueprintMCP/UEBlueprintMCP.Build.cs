@@ -74,6 +74,7 @@ public class UEBlueprintMCP : ModuleRules
 			"AIModule",           // For Behavior Tree / Blackboard introspection
 			"GameplayTasks",      // Required by AIModule headers
 			"ImageWrapper",       // PNG encoding for take_screenshot
+			"Niagara",            // niagara_params (rapid iteration stores of full Niagara systems)
 		});
 
 		bool bEnhancedInput = ShouldUseEnhancedInput(Target);

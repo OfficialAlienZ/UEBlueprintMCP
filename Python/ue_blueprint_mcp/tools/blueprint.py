@@ -222,6 +222,24 @@ def get_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="niagara_params",
+            description=(
+                "Read/edit module inputs of a full Niagara system (Lifetime, velocity, size, color...). Lists "
+                "'Constants.<Emitter>.<Module>.<Input>=value' (float/int/bool/vector/color). 'set' changes values "
+                "(name = full name or unique substring; numbers, or arrays for vectors/colors)."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "asset_path": {"type": "string"},
+                    "filter": {"type": "string", "description": "Name substring, e.g. Lifetime"},
+                    "set": {"type": "object", "description": "name -> value"},
+                    "limit": {"type": "integer"}
+                },
+                "required": ["asset_path"]
+            }
+        ),
+        Tool(
             name="get_object_properties",
             description=(
                 "Read-only export of EVERY reflected property (UPROPERTY) of an object as Export Text, like the "
@@ -442,6 +460,7 @@ TOOL_HANDLERS = {
     "get_curve_info": "get_curve_info",
     "get_data_table_info": "get_data_table_info",
     "set_data_table_row": "set_data_table_row",
+    "niagara_params": "niagara_params",
     "get_object_properties": "get_object_properties",
     "get_project_config": "get_project_config",
     "set_blueprint_property": "set_blueprint_property",

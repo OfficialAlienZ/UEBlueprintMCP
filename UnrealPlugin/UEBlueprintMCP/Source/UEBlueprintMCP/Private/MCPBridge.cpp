@@ -9,6 +9,7 @@
 #include "Actions/AIActions.h"
 #include "Actions/AssetInspectionActions.h"
 #include "Actions/DataTableActions.h"
+#include "Actions/NiagaraActions.h"
 #include "Actions/SearchActions.h"
 #include "Actions/ObjectInspectionActions.h"
 #include "Actions/PIEActions.h"
@@ -113,6 +114,7 @@ void UMCPBridge::RegisterActions()
 	ActionHandlers.Add(TEXT("get_object_properties"), MakeShared<FGetObjectPropertiesAction>());
 	ActionHandlers.Add(TEXT("get_project_config"), MakeShared<FGetProjectConfigAction>());
 	ActionHandlers.Add(TEXT("set_data_table_row"), MakeShared<FSetDataTableRowAction>());
+	ActionHandlers.Add(TEXT("niagara_params"), MakeShared<FNiagaraParamsAction>());
 
 	// =========================================================================
 	// Editor Actions (actors, viewport, save)
