@@ -43,6 +43,7 @@ public class UEBlueprintMCP : ModuleRules
 			"Core",
 			"CoreUObject",
 			"Engine",
+			"NavigationSystem",
 			"Slate",
 			"SlateCore",
 			"InputCore",

@@ -143,10 +143,11 @@ namespace MCPCompat
 	}
 
 	/** Queue a Play-In-Editor / Simulate session (starts on the next editor tick). Same API in UE 4.25+ and 5.x. */
-	inline void RequestPlaySession(bool bSimulate)
+	inline void RequestPlaySession(bool bSimulate, const FString& MapOverride = FString())
 	{
 		FRequestPlaySessionParams Params;
 		Params.WorldType = bSimulate ? EPlaySessionWorldType::SimulateInEditor : EPlaySessionWorldType::PlayInEditor;
+		Params.GlobalMapOverride = MapOverride;
 		GEditor->RequestPlaySession(Params);
 	}
 

@@ -13,6 +13,9 @@
 #include "Engine/PointLight.h"
 #include "Engine/SpotLight.h"
 #include "Camera/CameraActor.h"
+#include "ActorFactories/ActorFactoryBoxVolume.h"
+#include "GameFramework/Volume.h"
+#include "NavMesh/NavMeshBoundsVolume.h"
 #include "Kismet/GameplayStatics.h"
 #include "EngineUtils.h"
 #include "Algo/Sort.h"
@@ -288,7 +291,18 @@ TSharedPtr<FJsonObject> FSpawnActorAction::ExecuteInternal(const TSharedPtr<FJso
 	SpawnParams.Name = FName(*ActorName);
 	SpawnParams.NameMode = FActorSpawnParameters::ESpawnActorNameMode::Requested;
 
-	AActor* NewActor = World->SpawnActor<AActor>(ActorClass, Location, Rotation, SpawnParams);
+	AActor* NewActor = nullptr;
+	if (ActorClass->IsChildOf(AVolume::StaticClass()))
+	{
+		// Volumes need a brush: the editor's box-volume factory builds the default cube (scale it with `scale`).
+		UActorFactoryBoxVolume* Factory = NewObject<UActorFactoryBoxVolume>();
+		Factory->NewActorClass = ActorClass;
+		NewActor = Factory->CreateActor(nullptr, World->GetCurrentLevel(), FTransform(Rotation, Location), SpawnParams);
+	}
+	else
+	{
+		NewActor = World->SpawnActor<AActor>(ActorClass, Location, Rotation, SpawnParams);
+	}
 	if (!NewActor)
 	{
 		return CreateErrorResponse(TEXT("Failed to spawn actor"), TEXT("spawn_failed"));
@@ -314,6 +328,7 @@ UClass* FSpawnActorAction::ResolveActorClass(const FString& TypeName) const
 	if (TypeName == TEXT("DirectionalLight")) return ADirectionalLight::StaticClass();
 	if (TypeName == TEXT("CameraActor")) return ACameraActor::StaticClass();
 	if (TypeName == TEXT("Actor")) return AActor::StaticClass();
+	if (TypeName == TEXT("NavMeshBoundsVolume")) return ANavMeshBoundsVolume::StaticClass();
 	return nullptr;
 }
 

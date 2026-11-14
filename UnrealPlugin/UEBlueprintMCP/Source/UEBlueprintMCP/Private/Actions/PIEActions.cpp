@@ -164,7 +164,7 @@ TSharedPtr<FJsonObject> FStartPIEAction::ExecuteInternal(const TSharedPtr<FJsonO
 	Context.FlushPendingSave();
 
 	FMCPPIE::MarkStartRequested();
-	MCPCompat::RequestPlaySession(bSimulate);
+	MCPCompat::RequestPlaySession(bSimulate, GetOptionalString(Params, TEXT("map")));
 
 	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
 	Result->SetStringField(TEXT("state"), TEXT("starting"));

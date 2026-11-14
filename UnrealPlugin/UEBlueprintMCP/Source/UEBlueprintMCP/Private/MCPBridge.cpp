@@ -12,6 +12,7 @@
 #include "Actions/SearchActions.h"
 #include "Actions/ObjectInspectionActions.h"
 #include "Actions/PIEActions.h"
+#include "Actions/ScenarioActions.h"
 #include "Actions/GameplayActions.h"
 #include "Actions/RuntimeUIActions.h"
 #include "Actions/ObserveActions.h"
@@ -146,6 +147,8 @@ void UMCPBridge::RegisterActions()
 	ActionHandlers.Add(TEXT("set_mouse_position"), MakeShared<FSetMousePositionAction>());
 	ActionHandlers.Add(TEXT("check_condition"), MakeShared<FCheckConditionAction>());
 	ActionHandlers.Add(TEXT("take_screenshot"), MakeShared<FTakeScreenshotAction>());
+	ActionHandlers.Add(TEXT("run_scenario"), MakeShared<FRunScenarioAction>());
+	ActionHandlers.Add(TEXT("scenario_report"), MakeShared<FScenarioReportAction>());
 
 	// Automation Test Framework (Functional Tests, Project.* tests)
 	ActionHandlers.Add(TEXT("list_automation_tests"), MakeShared<FListAutomationTestsAction>());

@@ -41,6 +41,7 @@ private:
  * Parameters:
  *   - simulate (optional, default false): Simulate In Editor instead of Play In Editor
  *   - clear_log (optional, default false): Clear the captured Output Log before starting
+ *   - map (optional): play this map (e.g. /Game/Maps/Test) instead of the level open in the editor
  */
 class UEBLUEPRINTMCP_API FStartPIEAction : public FEditorAction
 {

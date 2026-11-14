@@ -62,3 +62,7 @@ Frequency: always / N of M runs
 ```
 
 Reproduce a bug twice from a fresh `start_pie` before reporting it, and say which part is a game bug and which is a test-setup limitation (for example a UMG button that cannot be clicked through input).
+
+## Scripted scenarios (`run_scenario`)
+
+For repeatable tests in a fixed map, `run_scenario` starts PIE on `map`, runs the game's start event, spawns actors and samples them, then `scenario_report` returns a compact text report (distance, angle, properties, log warnings). Parameters: `duration`, `interval`, `map`, `player`, `mobs[]` (class + count + position), `spawn[]` (extra actors), `actions[]` (`t`, `target`, `call`/`args`, `set`, `read`), `keep_open`. `start_pie` also takes `map`. The game-specific parts (`StartGame`, mob `Initialize`) are in `ScenarioActions.cpp`; adapt them for another project.
