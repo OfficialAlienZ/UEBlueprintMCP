@@ -195,6 +195,9 @@ void UMCPBridge::RegisterActions()
 	ActionHandlers.Add(TEXT("add_blueprint_self_reference"), MakeShared<FAddBlueprintSelfReferenceAction>());
 	ActionHandlers.Add(TEXT("add_blueprint_get_self_component_reference"), MakeShared<FAddBlueprintGetSelfComponentReferenceAction>());
 	ActionHandlers.Add(TEXT("add_blueprint_branch_node"), MakeShared<FAddBlueprintBranchNodeAction>());
+	ActionHandlers.Add(TEXT("create_blueprint_interface"), MakeShared<FCreateBlueprintInterfaceAction>());
+	ActionHandlers.Add(TEXT("add_blueprint_interface"), MakeShared<FAddBlueprintInterfaceAction>());
+	ActionHandlers.Add(TEXT("remove_blueprint_interface"), MakeShared<FRemoveBlueprintInterfaceAction>());
 	ActionHandlers.Add(TEXT("add_anim_slot_node"), MakeShared<FAddAnimSlotNodeAction>());
 	ActionHandlers.Add(TEXT("add_blueprint_cast_node"), MakeShared<FAddBlueprintCastNodeAction>());
 	ActionHandlers.Add(TEXT("add_array_get_node"), MakeShared<FAddArrayGetNodeAction>());

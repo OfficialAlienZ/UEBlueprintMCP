@@ -1013,6 +1013,20 @@ UK2Node_Event* FMCPCommonUtils::CreateEventNode(UEdGraph* Graph, const FString& 
 		}
 	}
 
+	// Interface event (void interface function implemented by this Blueprint): override of the interface function
+	if (EventNode->EventReference.GetMemberName().IsNone())
+	{
+		for (const FBPInterfaceDescription& Desc : Blueprint->ImplementedInterfaces)
+		{
+			if (Desc.Interface && Desc.Interface->FindFunctionByName(FName(*EventName)))
+			{
+				EventNode->EventReference.SetExternalMember(FName(*EventName), Desc.Interface);
+				EventNode->bOverrideFunction = true;
+				break;
+			}
+		}
+	}
+
 	EventNode->NodePosX = Position.X;
 	EventNode->NodePosY = Position.Y;
 

@@ -42,6 +42,42 @@ def get_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="create_blueprint_interface",
+            description="Create a Blueprint Interface asset (fails if it exists). Add its functions with create_blueprint_function (inputs/outputs) on the interface.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Plain name (created in /Game/Blueprints/) or full asset path (e.g. /Game/Folder/BPI_Name)"}
+                },
+                "required": ["name"]
+            }
+        ),
+        Tool(
+            name="add_blueprint_interface",
+            description="Add an interface to a Blueprint (Class Settings > Implemented Interfaces). Void interface functions then become events (add_blueprint_event_node with the function name); functions with outputs get their own function graph. Calling an interface function on another object: add_blueprint_function_node with target = the interface Blueprint (name or path) creates a message node.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "blueprint_name": {"type": "string", "description": "Blueprint that implements the interface"},
+                    "interface": {"type": "string", "description": "Blueprint Interface (short name or /Game path) or native interface class"}
+                },
+                "required": ["blueprint_name", "interface"]
+            }
+        ),
+        Tool(
+            name="remove_blueprint_interface",
+            description="Remove an implemented interface from a Blueprint.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "blueprint_name": {"type": "string", "description": "Blueprint"},
+                    "interface": {"type": "string", "description": "Interface to remove"},
+                    "preserve_functions": {"type": "boolean", "description": "Keep the implemented function graphs as normal functions (default false)"}
+                },
+                "required": ["blueprint_name", "interface"]
+            }
+        ),
+        Tool(
             name="compile_blueprint",
             description="Compile a Blueprint. Returns error details if compilation fails.",
             inputSchema={
@@ -396,6 +432,9 @@ TOOL_HANDLERS = {
     "remove_from_blueprint": "remove_from_blueprint",
     "delete_asset": "delete_asset",
     "create_blueprint": "create_blueprint",
+    "create_blueprint_interface": "create_blueprint_interface",
+    "add_blueprint_interface": "add_blueprint_interface",
+    "remove_blueprint_interface": "remove_blueprint_interface",
     "compile_blueprint": "compile_blueprint",
     "get_blueprint_info": "get_blueprint_info",
     "get_behavior_tree_info": "get_behavior_tree_info",

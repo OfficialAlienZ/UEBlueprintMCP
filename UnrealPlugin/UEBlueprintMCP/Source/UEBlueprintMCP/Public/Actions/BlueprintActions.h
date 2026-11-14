@@ -45,6 +45,36 @@ private:
 };
 
 
+/** Create a Blueprint Interface asset (add functions afterwards with create_blueprint_function). Params: name (plain name -> /Game/Blueprints/ or full path). Fails if the asset already exists. */
+class UEBLUEPRINTMCP_API FCreateBlueprintInterfaceAction : public FBlueprintAction
+{
+public:
+	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
+protected:
+	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
+	virtual FString GetActionName() const override { return TEXT("create_blueprint_interface"); }
+};
+
+/** Add an interface to a Blueprint (Class Settings > Implemented Interfaces). Params: blueprint_name, interface (Blueprint Interface name/path or native interface class). */
+class UEBLUEPRINTMCP_API FAddBlueprintInterfaceAction : public FBlueprintAction
+{
+public:
+	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
+protected:
+	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
+	virtual FString GetActionName() const override { return TEXT("add_blueprint_interface"); }
+};
+
+/** Remove an interface from a Blueprint. Params: blueprint_name, interface, preserve_functions (default false). */
+class UEBLUEPRINTMCP_API FRemoveBlueprintInterfaceAction : public FBlueprintAction
+{
+public:
+	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
+protected:
+	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
+	virtual FString GetActionName() const override { return TEXT("remove_blueprint_interface"); }
+};
+
 /**
  * FCompileBlueprintAction
  *

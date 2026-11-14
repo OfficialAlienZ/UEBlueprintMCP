@@ -1,6 +1,7 @@
 // Copyright (c) 2025 zolnoor. All rights reserved.
 
 #include "Actions/BlueprintActions.h"
+#include "UObject/UObjectIterator.h"
 #include "MCPCommonUtils.h"
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
@@ -1538,4 +1539,160 @@ TSharedPtr<FJsonObject> FDeleteAssetAction::ExecuteInternal(const TSharedPtr<FJs
 		ResultObj->SetArrayField(TEXT("not_deleted"), Blocked);
 	}
 	return ResultObj;
+}
+
+
+// ============================================================================
+// Blueprint Interfaces
+// ============================================================================
+
+namespace
+{
+	/** Resolve an interface class: Blueprint Interface (short name or /Game path) or native interface (/Script/Module.Class or name). */
+	UClass* ResolveInterfaceClass(const FString& Name)
+	{
+		FString Clean = Name.TrimStartAndEnd();
+		if (Clean.StartsWith(TEXT("/")) && Clean.Contains(TEXT(".")))
+		{
+			if (UClass* PathClass = LoadObject<UClass>(nullptr, *Clean)) return PathClass;
+		}
+		FString BPName = Clean;
+		BPName.RemoveFromEnd(TEXT("_C"));
+		if (UBlueprint* BP = FMCPCommonUtils::FindBlueprint(BPName))
+		{
+			return BP->GeneratedClass;
+		}
+		for (TObjectIterator<UClass> It; It; ++It)
+		{
+			if (It->HasAnyClassFlags(CLASS_Interface) && (It->GetName() == Clean || It->GetName() == TEXT("U") + Clean))
+			{
+				return *It;
+			}
+		}
+		return nullptr;
+	}
+
+	bool ValidateInterfaceParams(const TSharedPtr<FJsonObject>& Params, FString& OutError)
+	{
+		FString Interface;
+		if (!Params->TryGetStringField(TEXT("interface"), Interface) || Interface.IsEmpty())
+		{
+			OutError = TEXT("Missing required parameter: interface");
+			return false;
+		}
+		UClass* IClass = ResolveInterfaceClass(Interface);
+		if (!IClass || !IClass->HasAnyClassFlags(CLASS_Interface))
+		{
+			OutError = FString::Printf(TEXT("Interface not found (or not an interface): %s"), *Interface);
+			return false;
+		}
+		return true;
+	}
+}
+
+bool FCreateBlueprintInterfaceAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	FString Name, PackagePath, AssetName;
+	if (!GetRequiredString(Params, TEXT("name"), Name, OutError)) return false;
+	return ParseBlueprintTarget(Name, PackagePath, AssetName, OutError);
+}
+
+TSharedPtr<FJsonObject> FCreateBlueprintInterfaceAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	FString RawName, Error, PackagePath, AssetName;
+	GetRequiredString(Params, TEXT("name"), RawName, Error);
+	ParseBlueprintTarget(RawName, PackagePath, AssetName, Error);
+
+	const FString PackageName = PackagePath + AssetName;
+	if (FPackageName::DoesPackageExist(PackageName) || FindPackage(nullptr, *PackageName))
+	{
+		return CreateErrorResponse(FString::Printf(TEXT("Asset already exists: %s"), *PackageName), TEXT("already_exists"));
+	}
+
+	UPackage* Package = CreatePackage(*PackageName);
+	UBlueprint* NewBP = FKismetEditorUtilities::CreateBlueprint(
+		UInterface::StaticClass(), Package, FName(*AssetName), BPTYPE_Interface,
+		UBlueprint::StaticClass(), UBlueprintGeneratedClass::StaticClass());
+	if (!NewBP)
+	{
+		return CreateErrorResponse(TEXT("Failed to create Blueprint Interface"), TEXT("creation_failed"));
+	}
+
+	FAssetRegistryModule::AssetCreated(NewBP);
+	Package->MarkPackageDirty();
+	Context.SetCurrentBlueprint(NewBP);
+	Context.MarkPackageDirty(Package);
+
+	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("name"), AssetName);
+	Result->SetStringField(TEXT("path"), PackageName);
+	return CreateSuccessResponse(Result);
+}
+
+bool FAddBlueprintInterfaceAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	return ValidateBlueprint(Params, Context, OutError) && ValidateInterfaceParams(Params, OutError);
+}
+
+TSharedPtr<FJsonObject> FAddBlueprintInterfaceAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	UBlueprint* Blueprint = GetTargetBlueprint(Params, Context);
+	UClass* IClass = ResolveInterfaceClass(Params->GetStringField(TEXT("interface")));
+
+	for (const FBPInterfaceDescription& Desc : Blueprint->ImplementedInterfaces)
+	{
+		if (Desc.Interface == IClass)
+		{
+			TSharedPtr<FJsonObject> Already = MakeShared<FJsonObject>();
+			Already->SetBoolField(TEXT("already_implemented"), true);
+			return CreateSuccessResponse(Already);
+		}
+	}
+
+	if (!FBlueprintEditorUtils::ImplementNewInterface(Blueprint, FTopLevelAssetPath(IClass->GetPathName())))
+	{
+		return CreateErrorResponse(TEXT("ImplementNewInterface failed (interface not allowed on this Blueprint?)"));
+	}
+	FKismetEditorUtilities::CompileBlueprint(Blueprint);
+	MarkBlueprintModified(Blueprint, Context);
+
+	// Void functions appear as events (add_blueprint_event_node with the function name); functions with outputs get their own graph.
+	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+	TArray<TSharedPtr<FJsonValue>> Funcs;
+	for (TFieldIterator<UFunction> It(IClass, EFieldIterationFlags::None); It; ++It)
+	{
+		Funcs.Add(MakeShared<FJsonValueString>((*It)->GetName()));
+	}
+	Result->SetArrayField(TEXT("functions"), Funcs);
+	return CreateSuccessResponse(Result);
+}
+
+bool FRemoveBlueprintInterfaceAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	return ValidateBlueprint(Params, Context, OutError) && ValidateInterfaceParams(Params, OutError);
+}
+
+TSharedPtr<FJsonObject> FRemoveBlueprintInterfaceAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	UBlueprint* Blueprint = GetTargetBlueprint(Params, Context);
+	UClass* IClass = ResolveInterfaceClass(Params->GetStringField(TEXT("interface")));
+	const bool bPreserve = GetOptionalBool(Params, TEXT("preserve_functions"), false);
+
+	bool bFound = false;
+	for (const FBPInterfaceDescription& Desc : Blueprint->ImplementedInterfaces)
+	{
+		if (Desc.Interface == IClass) { bFound = true; break; }
+	}
+	if (!bFound)
+	{
+		return CreateErrorResponse(FString::Printf(TEXT("Blueprint '%s' does not implement this interface"), *Blueprint->GetName()), TEXT("not_found"));
+	}
+
+	FBlueprintEditorUtils::RemoveInterface(Blueprint, FTopLevelAssetPath(IClass->GetPathName()), bPreserve);
+	FKismetEditorUtilities::CompileBlueprint(Blueprint);
+	MarkBlueprintModified(Blueprint, Context);
+
+	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetBoolField(TEXT("removed"), true);
+	return CreateSuccessResponse(Result);
 }

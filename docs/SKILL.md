@@ -98,6 +98,11 @@ Follow `docs/OPTIMIZE.md` (measure -> classify bottleneck -> audit -> fix -> re-
 ### Blueprint Function Graphs
 - `create_blueprint_function` - Create function graph with inputs/outputs, returns entry_node_id and result_node_id. Param types: Float, Boolean, Integer, String, Name, Text, Vector, Rotator, Transform, `Object`/`Class` + `class` key, or a class/Blueprint name as the type (object reference, e.g. `Actor`). Unknown types are rejected
 - `delete_blueprint_function` - Delete a function graph by `function_name` (recompiles; call nodes elsewhere become compile errors)
+
+### Blueprint Interfaces
+- `create_blueprint_interface` - Create a Blueprint Interface asset (`name`, plain or full path; fails if it exists). Add functions with `create_blueprint_function` on it (inputs = parameters, outputs = return values)
+- `add_blueprint_interface` / `remove_blueprint_interface` - Add/remove an interface (`interface` = BP interface name/path or native class) in a Blueprint (`preserve_functions` on remove). Void interface functions become events (`add_blueprint_event_node` with the function name); functions with outputs get a function graph
+- Calling an interface function (message node): `add_blueprint_function_node` with `target` = the interface Blueprint (name or /Game path) and `function_name`; connect any object to the Target pin
 - All node commands support `graph_name` parameter to add nodes to function graphs instead of event graph
 
 ### Pin & Connection Management

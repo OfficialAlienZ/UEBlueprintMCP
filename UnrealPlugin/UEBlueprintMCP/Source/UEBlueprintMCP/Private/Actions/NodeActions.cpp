@@ -1646,6 +1646,24 @@ TSharedPtr<FJsonObject> FAddBlueprintFunctionNodeAction::ExecuteInternal(const T
 		}
 	}
 
+	// Target can also be a Blueprint (short name, /Game path or class path), e.g. a Blueprint Interface: its functions become message nodes
+	if (!TargetClass)
+	{
+		if (Target.StartsWith(TEXT("/")) && Target.Contains(TEXT(".")))
+		{
+			TargetClass = LoadObject<UClass>(nullptr, *Target);
+		}
+		if (!TargetClass)
+		{
+			FString TargetBPName = Target;
+			TargetBPName.RemoveFromEnd(TEXT("_C"));
+			if (UBlueprint* TargetBP = FMCPCommonUtils::FindBlueprint(TargetBPName))
+			{
+				TargetClass = TargetBP->GeneratedClass;
+			}
+		}
+	}
+
 	// Look for function in target class
 	if (TargetClass)
 	{

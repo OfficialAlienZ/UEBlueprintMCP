@@ -81,15 +81,14 @@ async def list_tools() -> list[Tool]:
         inputSchema={"type": "object", "properties": {}}
     ))
 
-    # Add tools from all modules
-    tools.extend(editor.get_tools())
-    tools.extend(blueprint.get_tools())
-    tools.extend(nodes.get_tools())
-    tools.extend(project.get_tools())
-    tools.extend(umg.get_tools())
-    tools.extend(materials.get_tools())
-    tools.extend(docs.get_tools())
-    tools.extend(performance.get_tools())
+    # Add tools from all modules. Env UE_MCP_HIDE=umg,materials,docs,performance,project hides whole groups from the
+    # tool list (saves context tokens; hidden tools can still be called). Default: everything is listed.
+    import os
+    hidden = {x.strip().lower() for x in os.environ.get("UE_MCP_HIDE", "").split(",") if x.strip()}
+    for group, module in (("editor", editor), ("blueprint", blueprint), ("nodes", nodes), ("project", project),
+                          ("umg", umg), ("materials", materials), ("docs", docs), ("performance", performance)):
+        if group not in hidden:
+            tools.extend(module.get_tools())
 
     for tool in tools:
         _slim_schema(tool.inputSchema)
