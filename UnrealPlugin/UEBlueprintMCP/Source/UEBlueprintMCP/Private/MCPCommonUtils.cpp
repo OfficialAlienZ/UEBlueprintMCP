@@ -992,9 +992,22 @@ UK2Node_Event* FMCPCommonUtils::CreateEventNode(UEdGraph* Graph, const FString& 
 		return nullptr;
 	}
 
+	// Interface event (void interface function implemented by this Blueprint): override of the interface function.
+	// Checked first: once the interface is added, the generated class already has a function with this name and the
+	// class lookup below would bind the event to the Blueprint itself instead of to the interface.
+	for (const FBPInterfaceDescription& Desc : Blueprint->ImplementedInterfaces)
+	{
+		if (Desc.Interface && Desc.Interface->FindFunctionByName(FName(*EventName)))
+		{
+			EventNode->EventReference.SetExternalMember(FName(*EventName), Desc.Interface);
+			EventNode->bOverrideFunction = true;
+			break;
+		}
+	}
+
 	// Find the event function in AActor or parent class
 	UClass* OwnerClass = Blueprint->GeneratedClass ? Blueprint->GeneratedClass : Blueprint->ParentClass;
-	if (OwnerClass)
+	if (OwnerClass && EventNode->EventReference.GetMemberName().IsNone())
 	{
 		UFunction* EventFunc = OwnerClass->FindFunctionByName(FName(*EventName), EIncludeSuperFlag::IncludeSuper);
 		if (EventFunc)
@@ -1009,20 +1022,6 @@ UK2Node_Event* FMCPCommonUtils::CreateEventNode(UEdGraph* Graph, const FString& 
 			if (EventFunc)
 			{
 				EventNode->EventReference.SetFromField<UFunction>(EventFunc, false);
-			}
-		}
-	}
-
-	// Interface event (void interface function implemented by this Blueprint): override of the interface function
-	if (EventNode->EventReference.GetMemberName().IsNone())
-	{
-		for (const FBPInterfaceDescription& Desc : Blueprint->ImplementedInterfaces)
-		{
-			if (Desc.Interface && Desc.Interface->FindFunctionByName(FName(*EventName)))
-			{
-				EventNode->EventReference.SetExternalMember(FName(*EventName), Desc.Interface);
-				EventNode->bOverrideFunction = true;
-				break;
 			}
 		}
 	}
