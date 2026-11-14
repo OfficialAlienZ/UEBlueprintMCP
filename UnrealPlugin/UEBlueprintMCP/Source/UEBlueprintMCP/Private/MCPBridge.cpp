@@ -13,6 +13,7 @@
 #include "Actions/ObjectInspectionActions.h"
 #include "Actions/PIEActions.h"
 #include "Actions/GameplayActions.h"
+#include "Actions/RuntimeUIActions.h"
 #include "Actions/ObserveActions.h"
 #include "Actions/AutomationActions.h"
 #include "Actions/PerformanceActions.h"
@@ -140,6 +141,9 @@ void UMCPBridge::RegisterActions()
 	ActionHandlers.Add(TEXT("execute_console_command"), MakeShared<FExecuteConsoleCommandAction>());
 	ActionHandlers.Add(TEXT("call_actor_function"), MakeShared<FCallActorFunctionAction>());
 	ActionHandlers.Add(TEXT("inject_input"), MakeShared<FInjectInputAction>());
+	ActionHandlers.Add(TEXT("list_widgets"), MakeShared<FListWidgetsAction>());
+	ActionHandlers.Add(TEXT("click_widget"), MakeShared<FClickWidgetAction>());
+	ActionHandlers.Add(TEXT("set_mouse_position"), MakeShared<FSetMousePositionAction>());
 	ActionHandlers.Add(TEXT("check_condition"), MakeShared<FCheckConditionAction>());
 	ActionHandlers.Add(TEXT("take_screenshot"), MakeShared<FTakeScreenshotAction>());
 

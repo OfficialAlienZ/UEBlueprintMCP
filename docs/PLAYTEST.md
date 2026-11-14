@@ -33,7 +33,7 @@ Cover: the happy path, boundaries (zero/max values, empty inventories), repeated
 ## Tips
 
 - Prefer `wait_for_condition` over fixed delays. Timed `inject_input` runs in game time and returns immediately; wait with `{type: "game_time", elapsed: N}`.
-- `inject_input` goes through the player controller, not Slate: it cannot click UMG buttons. Call the button's handler or the owning Blueprint's function with `call_actor_function` and verify the widget state with `get_object_properties`.
+- `inject_input` goes through the player controller, not Slate. Menus: `list_widgets` then `click_widget` (by name/text). Cursor aim: `set_mouse_position` (actor_name/location) then `inject_input` LeftMouseButton.
 - `call_actor_function` zero-initialises omitted arguments (Blueprint default values are not applied): pass every argument that matters.
 - Actor names in PIE can differ from the editor (spawned actors get suffixes). Use `find_actors_by_name` with `world: "pie"` or the aliases `@player_pawn`, `@player_controller`, `@game_mode`...
 - If game time barely advances, disable Editor Preferences > Performance > "Use Less CPU when in Background". `take_screenshot` needs a visible, non-minimised editor window.

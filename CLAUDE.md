@@ -45,6 +45,7 @@ UEBlueprintMCP/
 │       │       ├── ObjectInspectionActions.h # get_object_properties (full UPROPERTY export), get_project_config (ini)
 │       │       ├── PIEActions.h         # PIE start/stop/status, Output Log, console commands
 │       │       ├── GameplayActions.h    # Runtime gameplay driving in PIE (call_actor_function, inject_input)
+│       │       ├── RuntimeUIActions.h   # PIE UMG + cursor (list_widgets, click_widget, set_mouse_position)
 │       │       ├── ObserveActions.h     # check_condition (one-shot PIE assertions), take_screenshot
 │       │       ├── AutomationActions.h  # list/run/get results of Automation Framework tests (async runner on a core ticker)
 │       │       ├── PerformanceActions.h # get_performance_stats, audit_assets, audit_level (read-only)

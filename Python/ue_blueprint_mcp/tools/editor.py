@@ -30,11 +30,7 @@ async def _send_command(command_type: str, params: dict | None = None) -> list[T
 WORLD_PROPERTY = {
     "type": "string",
     "enum": ["editor", "pie", "auto"],
-    "description": (
-        "Which world to act on (default editor). 'pie' = the running Play-In-Editor game (start_pie first): "
-        "live runtime state, and actor names may also be @player_pawn, @player_controller, @player_state, "
-        "@hud, @game_mode, @game_state, @level_script. 'auto' = PIE if running, else editor."
-    ),
+    "description": "World (default editor); pie = running game (start_pie first; names may be @player_pawn, @player_controller, @game_mode...); auto = PIE if running.",
 }
 
 
@@ -351,7 +347,7 @@ def get_tools() -> list[Tool]:
         ),
         Tool(
             name="inject_input",
-            description="Feed key/mouse/gamepad input to the PIE player (start_pie first); timed inputs run in game time and return at once. Not for UMG widgets. E.g. {key:'W', action:'press', duration:2}, {key:'SpaceBar'}, {key:'MouseX', value:3, duration:0.5}.",
+            description="Feed key/mouse/gamepad input to the PIE player (start_pie first); timed inputs run in game time and return at once. Not for UMG widgets (use click_widget). E.g. {key:'W', action:'press', duration:2}, {key:'SpaceBar'}, {key:'MouseX', value:3, duration:0.5}.",
             inputSchema={
                 "type": "object",
                 "properties": {
@@ -360,6 +356,44 @@ def get_tools() -> list[Tool]:
                     "value": {"type": "number", "description": "Analog/axis value (default 1). A per-frame delta for mouse axes; axis keys re-send the value every frame while held"},
                     "duration": {"type": "number", "description": "Seconds of game time to hold the input"},
                     "player_index": {"type": "integer", "description": "Local player (default 0)"}
+                }
+            }
+        ),
+        Tool(
+            name="list_widgets",
+            description="List live UMG widgets in the PIE world with their shown+enabled buttons/check boxes (name, label text) to know what click_widget can press. widget filters by owner name/class; include_hidden adds hidden/disabled ones.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "widget": {"type": "string", "description": "Only user widgets whose name or class contains this text"},
+                    "include_hidden": {"type": "boolean", "description": "Also list hidden/collapsed/disabled controls (default false)"}
+                }
+            }
+        ),
+        Tool(
+            name="click_widget",
+            description="Click a UMG button in PIE (fires OnPressed/OnReleased/OnClicked; no mouse or focus needed) or set a check box. Give name (exact, from list_widgets) and/or text (label contains). Errors list candidates when 0 or several match.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Exact control name"},
+                    "text": {"type": "string", "description": "Label text (case-insensitive, contains)"},
+                    "widget": {"type": "string", "description": "Restrict to user widgets whose name or class contains this"},
+                    "checked": {"type": "boolean", "description": "Check box state to set (default: toggle)"}
+                }
+            }
+        ),
+        Tool(
+            name="set_mouse_position",
+            description="Move the PIE mouse cursor for cursor-aimed games (then inject_input LeftMouseButton to fire). Give x+y pixels, normalized [x,y] 0..1, actor_name (aim at actor, @player_pawn ok) or location [x,y,z]. Returns the resulting mouse position.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "x": {"type": "number"}, "y": {"type": "number"},
+                    "normalized": {"type": "array", "items": {"type": "number"}},
+                    "actor_name": {"type": "string"},
+                    "location": {"type": "array", "items": {"type": "number"}},
+                    "player_index": {"type": "integer"}
                 }
             }
         ),
@@ -378,7 +412,7 @@ def get_tools() -> list[Tool]:
             inputSchema={
                 "type": "object",
                 "properties": {
-                    "condition": {"type": "object", "description": "check_condition parameters (type, actor_name, property_name, operator, value, ...)", "properties": CONDITION_PROPERTIES},
+                    "condition": {"type": "object", "description": "Same fields as check_condition (type required; elapsed allowed for game_time)"},
                     "timeout_seconds": {"type": "number", "description": "Real-time limit (default 30; for game_time with elapsed: elapsed*2+10). Max 600"},
                     "poll_interval": {"type": "number", "description": "Seconds between checks (default 0.25)"},
                     "abort_conditions": {"type": "array", "items": {"type": "object"}, "description": "Conditions that stop the wait early when met"}
@@ -480,6 +514,9 @@ TOOL_HANDLERS = {
     "execute_console_command": "execute_console_command",
     "call_actor_function": "call_actor_function",
     "inject_input": "inject_input",
+    "list_widgets": "list_widgets",
+    "click_widget": "click_widget",
+    "set_mouse_position": "set_mouse_position",
     "check_condition": "check_condition",
     "wait_for_condition": "check_condition",
     "take_screenshot": "take_screenshot",
