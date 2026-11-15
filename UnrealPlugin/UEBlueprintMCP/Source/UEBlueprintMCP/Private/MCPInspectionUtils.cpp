@@ -19,6 +19,7 @@
 #include "WidgetBlueprint.h"
 #include "JsonObjectConverter.h"
 #include "UObject/UnrealType.h"
+#include "UObject/UObjectIterator.h"
 
 namespace
 {
@@ -319,6 +320,60 @@ UObject* FMCPInspectionUtils::FindAsset(const FString& NameOrPath, const TArray<
 			{
 				return AssetData.GetAsset();
 			}
+		}
+	}
+	return nullptr;
+}
+
+UEnum* FMCPInspectionUtils::FindEnum(const FString& NameOrPath)
+{
+	if (NameOrPath.StartsWith(TEXT("/")))
+	{
+		FString ObjectPath = NameOrPath;
+		if (!ObjectPath.Contains(TEXT(".")))
+		{
+			FString ShortName;
+			ObjectPath.Split(TEXT("/"), nullptr, &ShortName, ESearchCase::CaseSensitive, ESearchDir::FromEnd);
+			ObjectPath = ObjectPath + TEXT(".") + ShortName;
+		}
+		return LoadObject<UEnum>(nullptr, *ObjectPath);
+	}
+
+	TArray<UClass*> Classes;
+	Classes.Add(UUserDefinedEnum::StaticClass());
+	if (UEnum* Asset = Cast<UEnum>(FindAsset(NameOrPath, Classes)))
+	{
+		return Asset;
+	}
+	return MCPCompat::FindEnum(NameOrPath);
+}
+
+UScriptStruct* FMCPInspectionUtils::FindStruct(const FString& NameOrPath)
+{
+	TArray<UClass*> Classes;
+	Classes.Add(UUserDefinedStruct::StaticClass());
+	if (UScriptStruct* UserStruct = Cast<UScriptStruct>(FindAsset(NameOrPath, Classes)))
+	{
+		return UserStruct;
+	}
+
+	if (NameOrPath.StartsWith(TEXT("/Script/")))
+	{
+		return FindObject<UScriptStruct>(nullptr, *NameOrPath);
+	}
+	if (NameOrPath.StartsWith(TEXT("/")))
+	{
+		return nullptr;
+	}
+
+	// Native struct by short name; accept the C++ "F" prefix.
+	const FString Bare = (NameOrPath.Len() > 1 && NameOrPath[0] == TEXT('F') && FChar::IsUpper(NameOrPath[1])) ? NameOrPath.Mid(1) : NameOrPath;
+	for (TObjectIterator<UScriptStruct> It; It; ++It)
+	{
+		if (It->IsA<UUserDefinedStruct>()) continue;
+		if (It->GetName().Equals(Bare, ESearchCase::IgnoreCase))
+		{
+			return *It;
 		}
 	}
 	return nullptr;

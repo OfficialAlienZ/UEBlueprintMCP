@@ -19,6 +19,8 @@
 #include "Actions/OptimizationActions.h"
 #include "MCPLogCapture.h"
 #include "Actions/NodeActions.h"
+#include "Actions/StructNodeActions.h"
+#include "Actions/FlowNodeActions.h"
 #include "Actions/ProjectActions.h"
 #include "Actions/UMGActions.h"
 #include "Actions/MaterialActions.h"
@@ -108,6 +110,7 @@ void UMCPBridge::RegisterActions()
 	ActionHandlers.Add(TEXT("get_asset_timestamps"), MakeShared<FGetAssetTimestampsAction>());
 	ActionHandlers.Add(TEXT("get_object_properties"), MakeShared<FGetObjectPropertiesAction>());
 	ActionHandlers.Add(TEXT("get_project_config"), MakeShared<FGetProjectConfigAction>());
+	ActionHandlers.Add(TEXT("create_data_table"), MakeShared<FCreateDataTableAction>());
 	ActionHandlers.Add(TEXT("set_data_table_row"), MakeShared<FSetDataTableRowAction>());
 
 	// =========================================================================
@@ -157,6 +160,7 @@ void UMCPBridge::RegisterActions()
 	// Node Actions - Graph Operations
 	// =========================================================================
 	ActionHandlers.Add(TEXT("connect_blueprint_nodes"), MakeShared<FConnectBlueprintNodesAction>());
+	ActionHandlers.Add(TEXT("disconnect_blueprint_nodes"), MakeShared<FDisconnectBlueprintNodesAction>());
 	ActionHandlers.Add(TEXT("find_blueprint_nodes"), MakeShared<FFindBlueprintNodesAction>());
 	ActionHandlers.Add(TEXT("delete_blueprint_node"), MakeShared<FDeleteBlueprintNodeAction>());
 	ActionHandlers.Add(TEXT("get_node_pins"), MakeShared<FGetNodePinsAction>());
@@ -189,7 +193,11 @@ void UMCPBridge::RegisterActions()
 	ActionHandlers.Add(TEXT("add_blueprint_branch_node"), MakeShared<FAddBlueprintBranchNodeAction>());
 	ActionHandlers.Add(TEXT("add_blueprint_cast_node"), MakeShared<FAddBlueprintCastNodeAction>());
 	ActionHandlers.Add(TEXT("add_array_get_node"), MakeShared<FAddArrayGetNodeAction>());
+	ActionHandlers.Add(TEXT("add_struct_node"), MakeShared<FAddStructNodeAction>());
+	ActionHandlers.Add(TEXT("add_get_data_table_row_node"), MakeShared<FAddGetDataTableRowNodeAction>());
 	ActionHandlers.Add(TEXT("add_blueprint_get_subsystem_node"), MakeShared<FAddBlueprintGetSubsystemNodeAction>());
+	ActionHandlers.Add(TEXT("add_switch_string_case"), MakeShared<FAddSwitchStringCaseAction>());
+	ActionHandlers.Add(TEXT("add_return_node"), MakeShared<FAddReturnNodeAction>());
 
 	// =========================================================================
 	// Node Actions - Blueprint Function Graph
@@ -236,6 +244,7 @@ void UMCPBridge::RegisterActions()
 	ActionHandlers.Add(TEXT("create_umg_widget_blueprint"), MakeShared<FCreateUMGWidgetBlueprintAction>());
 	ActionHandlers.Add(TEXT("add_text_block_to_widget"), MakeShared<FAddTextBlockToWidgetAction>());
 	ActionHandlers.Add(TEXT("add_button_to_widget"), MakeShared<FAddButtonToWidgetAction>());
+	ActionHandlers.Add(TEXT("add_editable_text_box_to_widget"), MakeShared<FAddEditableTextBoxToWidgetAction>());
 	ActionHandlers.Add(TEXT("add_image_to_widget"), MakeShared<FAddImageToWidgetAction>());
 	ActionHandlers.Add(TEXT("duplicate_widget"), MakeShared<FDuplicateWidgetAction>());
 	ActionHandlers.Add(TEXT("remove_widget"), MakeShared<FRemoveWidgetAction>());

@@ -3,8 +3,10 @@
 #include "Actions/NodeActions.h"
 #include "MCPCommonUtils.h"
 #include "MCPNodeLayout.h"
+#include "MCPInspectionUtils.h"
 #include "Engine/Blueprint.h"
 #include "Engine/BlueprintGeneratedClass.h"
+#include "Engine/Texture2D.h"
 #include "EdGraph/EdGraph.h"
 #include "EdGraph/EdGraphNode.h"
 #include "EdGraph/EdGraphPin.h"
@@ -238,6 +240,172 @@ bool FConnectBlueprintNodesAction::ConnectPair(UEdGraph* TargetGraph, const FStr
 	SourceNode->PinConnectionListChanged(SourcePin);
 	TargetNode->PinConnectionListChanged(TargetPin);
 	FMCPNodeLayout::OnPinsConnected(SourcePin, TargetPin, Context);
+	return true;
+}
+
+
+bool FDisconnectBlueprintNodesAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	if (const TArray<TSharedPtr<FJsonValue>>* Connections = GetOptionalArray(Params, TEXT("connections")))
+	{
+		if (Connections->Num() == 0)
+		{
+			OutError = TEXT("'connections' must contain at least one entry");
+			return false;
+		}
+		for (int32 i = 0; i < Connections->Num(); ++i)
+		{
+			const TSharedPtr<FJsonObject>* Item = nullptr;
+			FString Value;
+			if (!(*Connections)[i].IsValid() || !(*Connections)[i]->TryGetObject(Item) || !Item || !Item->IsValid())
+			{
+				OutError = FString::Printf(TEXT("connections[%d] must be an object"), i);
+				return false;
+			}
+			for (const TCHAR* Key : { TEXT("source_node_id"), TEXT("source_pin"), TEXT("target_node_id"), TEXT("target_pin") })
+			{
+				if (!(*Item)->TryGetStringField(Key, Value) || Value.IsEmpty())
+				{
+					OutError = FString::Printf(TEXT("connections[%d] is missing required field '%s'"), i, Key);
+					return false;
+				}
+			}
+		}
+		return ValidateGraph(Params, Context, OutError);
+	}
+
+	FString SourceNodeId, TargetNodeId, SourcePin, TargetPin;
+	if (!GetRequiredString(Params, TEXT("source_node_id"), SourceNodeId, OutError)) return false;
+	if (!GetRequiredString(Params, TEXT("target_node_id"), TargetNodeId, OutError)) return false;
+	if (!GetRequiredString(Params, TEXT("source_pin"), SourcePin, OutError)) return false;
+	if (!GetRequiredString(Params, TEXT("target_pin"), TargetPin, OutError)) return false;
+	return ValidateGraph(Params, Context, OutError);
+}
+
+TSharedPtr<FJsonObject> FDisconnectBlueprintNodesAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	UBlueprint* Blueprint = GetTargetBlueprint(Params, Context);
+	UEdGraph* TargetGraph = GetTargetGraph(Params, Context);
+
+	// Single wire
+	const TArray<TSharedPtr<FJsonValue>>* Connections = GetOptionalArray(Params, TEXT("connections"));
+	if (!Connections)
+	{
+		const FString SourceNodeId = Params->GetStringField(TEXT("source_node_id"));
+		const FString TargetNodeId = Params->GetStringField(TEXT("target_node_id"));
+
+		FString Error;
+		if (!BreakPair(TargetGraph, SourceNodeId, Params->GetStringField(TEXT("source_pin")),
+			TargetNodeId, Params->GetStringField(TEXT("target_pin")), Context, Error))
+		{
+			return CreateErrorResponse(Error);
+		}
+
+		MarkBlueprintModified(Blueprint, Context);
+		Context.RequestSave();
+
+		TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
+		ResultData->SetStringField(TEXT("source_node_id"), SourceNodeId);
+		ResultData->SetStringField(TEXT("target_node_id"), TargetNodeId);
+		ResultData->SetNumberField(TEXT("disconnected"), 1);
+		return CreateSuccessResponse(ResultData);
+	}
+
+	// Batch: break every wire, then mark/save the Blueprint once
+	int32 Applied = 0;
+	TArray<TSharedPtr<FJsonValue>> Failures;
+	for (int32 i = 0; i < Connections->Num(); ++i)
+	{
+		const TSharedPtr<FJsonObject> Item = (*Connections)[i]->AsObject();
+		FString Error;
+		if (BreakPair(TargetGraph,
+			Item->GetStringField(TEXT("source_node_id")), Item->GetStringField(TEXT("source_pin")),
+			Item->GetStringField(TEXT("target_node_id")), Item->GetStringField(TEXT("target_pin")), Context, Error))
+		{
+			++Applied;
+		}
+		else
+		{
+			TSharedPtr<FJsonObject> Failure = MakeShared<FJsonObject>();
+			Failure->SetNumberField(TEXT("index"), i);
+			Failure->SetStringField(TEXT("error"), Error);
+			Failures.Add(MakeShared<FJsonValueObject>(Failure));
+		}
+	}
+
+	if (Applied > 0)
+	{
+		MarkBlueprintModified(Blueprint, Context);
+		Context.RequestSave();
+	}
+
+	if (Failures.Num() > 0)
+	{
+		TArray<FString> Messages;
+		for (const TSharedPtr<FJsonValue>& Failure : Failures)
+		{
+			const TSharedPtr<FJsonObject> Obj = Failure->AsObject();
+			Messages.Add(FString::Printf(TEXT("connections[%d]: %s"), (int32)Obj->GetNumberField(TEXT("index")), *Obj->GetStringField(TEXT("error"))));
+		}
+		return CreateErrorResponse(FString::Printf(TEXT("%d of %d disconnects applied; %d failed: %s"),
+			Applied, Connections->Num(), Failures.Num(), *FString::Join(Messages, TEXT(" | "))));
+	}
+
+	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
+	ResultData->SetNumberField(TEXT("disconnected"), Applied);
+	return CreateSuccessResponse(ResultData);
+}
+
+bool FDisconnectBlueprintNodesAction::BreakPair(UEdGraph* TargetGraph, const FString& SourceNodeId, const FString& SourcePinName,
+	const FString& TargetNodeId, const FString& TargetPinName, FMCPEditorContext& Context, FString& OutError) const
+{
+	UEdGraphNode* SourceNode = nullptr;
+	UEdGraphNode* TargetNode = nullptr;
+	for (UEdGraphNode* Node : TargetGraph->Nodes)
+	{
+		if (!Node) continue;
+		const FString Guid = Node->NodeGuid.ToString();
+		if (Guid == SourceNodeId)
+		{
+			SourceNode = Node;
+		}
+		if (Guid == TargetNodeId)
+		{
+			TargetNode = Node;
+		}
+	}
+
+	if (!SourceNode || !TargetNode)
+	{
+		OutError = TEXT("Source or target node not found");
+		return false;
+	}
+
+	UEdGraphPin* SourcePin = FMCPCommonUtils::FindPin(SourceNode, SourcePinName, EGPD_Output);
+	UEdGraphPin* TargetPin = FMCPCommonUtils::FindPin(TargetNode, TargetPinName, EGPD_Input);
+
+	if (!SourcePin)
+	{
+		OutError = FString::Printf(TEXT("Source pin '%s' not found as an OUTPUT pin on node"), *SourcePinName);
+		return false;
+	}
+
+	if (!TargetPin)
+	{
+		OutError = FString::Printf(TEXT("Target pin '%s' not found as an INPUT pin on node"), *TargetPinName);
+		return false;
+	}
+
+	if (!SourcePin->LinkedTo.Contains(TargetPin))
+	{
+		OutError = FString::Printf(TEXT("No wire between '%s' and '%s'; nothing to disconnect"),
+			*SourcePinName, *TargetPinName);
+		return false;
+	}
+
+	SourcePin->BreakLinkTo(TargetPin);
+	SourceNode->PinConnectionListChanged(SourcePin);
+	TargetNode->PinConnectionListChanged(TargetPin);
 	return true;
 }
 
@@ -761,6 +929,43 @@ TSharedPtr<FJsonObject> FAddBlueprintCustomEventAction::ExecuteInternal(const TS
 // Variable Nodes
 // ============================================================================
 
+namespace
+{
+	UClass* ResolveOwnerClass(const FString& ClassName);
+
+	/**
+	 * Strip an array container from a variable type string. Accepts "Array of String", "Array<String>",
+	 * "String[]" and "String Array". Returns the element type name and sets bOutIsArray.
+	 */
+	FString SplitVariableContainer(const FString& TypeName, bool& bOutIsArray)
+	{
+		const FString Trimmed = TypeName.TrimStartAndEnd();
+		bOutIsArray = false;
+
+		if (Trimmed.StartsWith(TEXT("Array of "), ESearchCase::IgnoreCase))
+		{
+			bOutIsArray = true;
+			return Trimmed.Mid(9).TrimStartAndEnd();
+		}
+		if (Trimmed.StartsWith(TEXT("Array<"), ESearchCase::IgnoreCase) && Trimmed.EndsWith(TEXT(">")))
+		{
+			bOutIsArray = true;
+			return Trimmed.Mid(6, Trimmed.Len() - 7).TrimStartAndEnd();
+		}
+		if (Trimmed.EndsWith(TEXT("[]")))
+		{
+			bOutIsArray = true;
+			return Trimmed.LeftChop(2).TrimStartAndEnd();
+		}
+		if (Trimmed.EndsWith(TEXT(" Array"), ESearchCase::IgnoreCase))
+		{
+			bOutIsArray = true;
+			return Trimmed.LeftChop(6).TrimStartAndEnd();
+		}
+		return Trimmed;
+	}
+}
+
 bool FAddBlueprintVariableAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
 {
 	FString VariableName, VariableType;
@@ -772,7 +977,9 @@ bool FAddBlueprintVariableAction::Validate(const TSharedPtr<FJsonObject>& Params
 TSharedPtr<FJsonObject> FAddBlueprintVariableAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
 {
 	FString VariableName = Params->GetStringField(TEXT("variable_name"));
-	FString VariableType = Params->GetStringField(TEXT("variable_type"));
+	const FString VariableTypeArg = Params->GetStringField(TEXT("variable_type"));
+	bool bIsArray = false;
+	const FString VariableType = SplitVariableContainer(VariableTypeArg, bIsArray);
 	bool IsExposed = GetOptionalBool(Params, TEXT("is_exposed"), false);
 
 	UBlueprint* Blueprint = GetTargetBlueprint(Params, Context);
@@ -809,9 +1016,32 @@ TSharedPtr<FJsonObject> FAddBlueprintVariableAction::ExecuteInternal(const TShar
 	{
 		PinType.PinCategory = UEdGraphSchema_K2::PC_MCDelegate;
 	}
+	else if (VariableType == TEXT("Texture") || VariableType == TEXT("Texture2D") || VariableType == TEXT("Texture Object Reference"))
+	{
+		// Texture Object Reference (UTexture2D)
+		PinType.PinCategory = UEdGraphSchema_K2::PC_Object;
+		PinType.PinSubCategoryObject = UTexture2D::StaticClass();
+	}
+	else if (VariableType.StartsWith(TEXT("Object:"), ESearchCase::IgnoreCase))
+	{
+		// Generic object reference: 'Object:StaticMesh', 'Object:/Script/Engine.Material', 'Object:BP_Objective'
+		const FString ClassName = VariableType.Mid(7).TrimStartAndEnd();
+		UClass* ObjectClass = ResolveOwnerClass(ClassName);
+		if (!ObjectClass)
+		{
+			return CreateErrorResponse(FString::Printf(TEXT("Object class '%s' not found for variable type '%s'. Use a Blueprint name, a class path (/Script/Engine.StaticMesh) or a native class name (StaticMesh)."), *ClassName, *VariableTypeArg));
+		}
+		PinType.PinCategory = UEdGraphSchema_K2::PC_Object;
+		PinType.PinSubCategoryObject = ObjectClass;
+	}
 	else
 	{
-		return CreateErrorResponse(FString::Printf(TEXT("Unsupported variable type: %s"), *VariableType));
+		return CreateErrorResponse(FString::Printf(TEXT("Unsupported variable type: %s. Supported: Boolean, Integer, Float, String, Vector, Vector2D, EventDispatcher, Texture (Texture Object Reference), Object:<Class>. Add [] / 'Array of' for arrays."), *VariableTypeArg));
+	}
+
+	if (bIsArray)
+	{
+		PinType.ContainerType = EPinContainerType::Array;
 	}
 
 	// Resolve replication condition up front so we fail before modifying the Blueprint
@@ -878,7 +1108,7 @@ TSharedPtr<FJsonObject> FAddBlueprintVariableAction::ExecuteInternal(const TShar
 
 	TSharedPtr<FJsonObject> ResultData = MakeShared<FJsonObject>();
 	ResultData->SetStringField(TEXT("variable_name"), VariableName);
-	ResultData->SetStringField(TEXT("variable_type"), VariableType);
+	ResultData->SetStringField(TEXT("variable_type"), VariableTypeArg);
 	ResultData->SetBoolField(TEXT("replicated"), bReplicated);
 	ResultData->SetBoolField(TEXT("already_existed"), bAlreadyExists);
 	return CreateSuccessResponse(ResultData);
@@ -1552,10 +1782,30 @@ namespace
 		FEdGraphPinType Type;
 	};
 
+	/** Enum pin (byte pin whose sub-category object is the enum). */
+	bool SetEnumPinType(const FString& NameOrPath, FEdGraphPinType& OutType)
+	{
+		UEnum* Enum = FMCPInspectionUtils::FindEnum(NameOrPath);
+		if (!Enum) return false;
+		OutType.PinCategory = UEdGraphSchema_K2::PC_Byte;
+		OutType.PinSubCategoryObject = Enum;
+		return true;
+	}
+
+	bool SetStructPinType(const FString& NameOrPath, FEdGraphPinType& OutType)
+	{
+		UScriptStruct* Struct = FMCPInspectionUtils::FindStruct(NameOrPath);
+		if (!Struct) return false;
+		OutType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+		OutType.PinSubCategoryObject = Struct;
+		return true;
+	}
+
 	/**
 	 * Map a parameter type string to a pin type. Primitive names (Float, Boolean, Integer, String, Name, Text,
-	 * Vector, Rotator, Transform), `Object` / `Class` (with ClassName, default Object) or any class name /
-	 * Blueprint name / class path (object reference of that class).
+	 * Vector, Rotator, Transform), `Object` / `Class` (with ClassName, default Object), `Enum` / `Struct` (with
+	 * ClassName = enum / struct name), or any class name / Blueprint name / class path (object reference of that
+	 * class), User Defined Enum (E_Rarity) or struct (S_Item) / native enum or struct name.
 	 */
 	bool ParseFunctionPinType(const FString& TypeName, const FString& ClassName, FEdGraphPinType& OutType, FString& OutError)
 	{
@@ -1588,6 +1838,22 @@ namespace
 
 		const bool bIsObjectKeyword = Is(TEXT("Object"));
 		const bool bIsClassKeyword = Is(TEXT("Class"));
+
+		if (Is(TEXT("Enum")) || Is(TEXT("Struct")))
+		{
+			const bool bEnum = Is(TEXT("Enum"));
+			if (ClassName.IsEmpty())
+			{
+				OutError = FString::Printf(TEXT("Type '%s' needs a 'class' field with the %s name, e.g. {\"type\": \"%s\", \"class\": \"%s\"}."),
+					*TypeName, bEnum ? TEXT("enum") : TEXT("struct"), *TypeName, bEnum ? TEXT("E_Rarity") : TEXT("S_Item"));
+				return false;
+			}
+			if (bEnum ? SetEnumPinType(ClassName, OutType) : SetStructPinType(ClassName, OutType)) return true;
+			OutError = FString::Printf(TEXT("%s '%s' not found. Pass a User Defined %s name/path or a native one."),
+				bEnum ? TEXT("Enum") : TEXT("Struct"), *ClassName, bEnum ? TEXT("Enum") : TEXT("Struct"));
+			return false;
+		}
+
 		const FString& ClassToResolve = (bIsObjectKeyword || bIsClassKeyword) ? ClassName : TypeName;
 
 		UClass* Class = nullptr;
@@ -1598,11 +1864,17 @@ namespace
 		else
 		{
 			Class = ResolveOwnerClass(ClassToResolve);
+			if (!Class && !bIsObjectKeyword && !bIsClassKeyword)
+			{
+				// Not a class: try a User Defined / native enum, then struct.
+				if (SetEnumPinType(ClassToResolve, OutType) || SetStructPinType(ClassToResolve, OutType)) return true;
+			}
 			if (!Class)
 			{
 				OutError = FString::Printf(
 					TEXT("Unknown type '%s'. Use Float, Boolean, Integer, String, Name, Text, Vector, Rotator, Transform, ")
-					TEXT("Object / Class with a 'class' field, or a class / Blueprint name (e.g. Actor, Character)."),
+					TEXT("Object / Class with a 'class' field, a class / Blueprint name (e.g. Actor, Character), ")
+					TEXT("or an enum / struct name (E_Rarity, S_Item; or Enum / Struct with a 'class' field)."),
 					*ClassToResolve);
 				return false;
 			}

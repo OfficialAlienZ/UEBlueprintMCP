@@ -32,25 +32,7 @@ namespace
 
 	UEnum* AssetInspect_ResolveEnum(const FString& EnumName)
 	{
-		if (EnumName.StartsWith(TEXT("/")))
-		{
-			FString ObjectPath = EnumName;
-			if (!ObjectPath.Contains(TEXT(".")))
-			{
-				FString ShortName;
-				ObjectPath.Split(TEXT("/"), nullptr, &ShortName, ESearchCase::CaseSensitive, ESearchDir::FromEnd);
-				ObjectPath = ObjectPath + TEXT(".") + ShortName;
-			}
-			return LoadObject<UEnum>(nullptr, *ObjectPath);
-		}
-
-		TArray<UClass*> Classes;
-		Classes.Add(UUserDefinedEnum::StaticClass());
-		if (UEnum* Asset = Cast<UEnum>(FMCPInspectionUtils::FindAsset(EnumName, Classes)))
-		{
-			return Asset;
-		}
-		return MCPCompat::FindEnum(EnumName);
+		return FMCPInspectionUtils::FindEnum(EnumName);
 	}
 
 	// ---- Curves ----

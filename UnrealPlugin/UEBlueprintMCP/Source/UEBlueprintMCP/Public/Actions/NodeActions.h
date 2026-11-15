@@ -33,6 +33,26 @@ private:
 };
 
 
+/** Remove one wire (or a batch of wires) between two pins in a Blueprint graph */
+class UEBLUEPRINTMCP_API FDisconnectBlueprintNodesAction : public FBlueprintNodeAction
+{
+public:
+	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
+protected:
+	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
+	virtual FString GetActionName() const override { return TEXT("disconnect_blueprint_nodes"); }
+
+	// Auto-save is requested by hand so a partially applied batch is still saved.
+	virtual bool RequiresSave() const override { return false; }
+	virtual bool BlocksDuringPIE() const override { return true; }
+
+private:
+	/** Break one wire (source output -> target input). Returns false and fills OutError if the pins are not linked. */
+	bool BreakPair(UEdGraph* Graph, const FString& SourceNodeId, const FString& SourcePinName,
+		const FString& TargetNodeId, const FString& TargetPinName, FMCPEditorContext& Context, FString& OutError) const;
+};
+
+
 /** Find nodes in a Blueprint graph */
 class UEBLUEPRINTMCP_API FFindBlueprintNodesAction : public FBlueprintNodeAction
 {

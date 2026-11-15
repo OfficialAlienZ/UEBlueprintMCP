@@ -33,3 +33,29 @@ protected:
 	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
 	virtual FString GetActionName() const override { return TEXT("set_data_table_row"); }
 };
+
+/**
+ * FCreateDataTableAction
+ *
+ * Create a Data Table asset with a row struct. Counterpart of set_data_table_row (which writes the rows).
+ *
+ * Parameters:
+ *   - name: Asset name, e.g. DT_Example (letters, digits, underscores)
+ *   - path (optional, default /Game/Data): Content folder that receives the table (must be under /Game)
+ *   - columns (optional): [{"name": "Value", "type": "Float"}, ...]. Creates a User Defined Struct
+ *       S_<name without DT_ prefix> (DT_Example -> S_Example) with these fields and uses it as the row struct.
+ *   - row_struct (optional): Existing row struct (name or path, e.g. S_Item or /Game/Data/S_Item).
+ *
+ * Exactly one of columns / row_struct is required. Existing assets are never overwritten.
+ * Column types: Boolean, Integer, Int64, Float, String, Name, Text, Vector, Vector2D, Rotator, Transform,
+ * an enum or a struct name. Prefix "Array of " (or suffix "[]") makes an array column.
+ */
+class UEBLUEPRINTMCP_API FCreateDataTableAction : public FEditorAction
+{
+public:
+	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
+
+protected:
+	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
+	virtual FString GetActionName() const override { return TEXT("create_data_table"); }
+};

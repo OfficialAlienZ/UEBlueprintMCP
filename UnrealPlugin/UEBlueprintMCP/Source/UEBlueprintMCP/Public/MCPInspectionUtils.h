@@ -9,6 +9,8 @@
 class AActor;
 class UObject;
 class UClass;
+class UEnum;
+class UScriptStruct;
 class UStruct;
 class UWidgetBlueprint;
 class FProperty;
@@ -45,6 +47,12 @@ public:
 	 * Short-name lookup only matches assets whose class is exactly one of Classes.
 	 */
 	static UObject* FindAsset(const FString& NameOrPath, const TArray<UClass*>& Classes);
+
+	/** Enum by User Defined Enum asset name/path (E_Rarity, /Game/Data/E_Rarity) or native name/path (ECollisionChannel, /Script/Engine.ECollisionChannel). Null if not found. */
+	static UEnum* FindEnum(const FString& NameOrPath);
+
+	/** Struct by User Defined Struct asset name/path (S_Item) or native name/path (Vector, FVector, /Script/Engine.HitResult). Null if not found. */
+	static UScriptStruct* FindStruct(const FString& NameOrPath);
 
 	/**
 	 * Value of a reflected property as JSON. Unlike the stock JSON converter this uses the names

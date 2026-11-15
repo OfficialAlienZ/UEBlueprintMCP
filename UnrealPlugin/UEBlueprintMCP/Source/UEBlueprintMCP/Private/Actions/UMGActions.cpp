@@ -7,6 +7,7 @@
 #include "AssetRegistry/AssetRegistryModule.h"
 #include "Blueprint/UserWidget.h"
 #include "Components/TextBlock.h"
+#include "Components/EditableTextBox.h"
 #include "WidgetBlueprint.h"
 #include "WidgetBlueprintEditor.h"
 #include "Blueprint/WidgetTree.h"
@@ -431,6 +432,91 @@ static void CompileAndSaveWidgetBlueprint(UWidgetBlueprint* WidgetBlueprint)
 	FBlueprintEditorUtils::MarkBlueprintAsStructurallyModified(WidgetBlueprint);
 	FKismetEditorUtilities::CompileBlueprint(WidgetBlueprint);
 	UEditorAssetLibrary::SaveAsset(WidgetBlueprint->GetPathName(), false);
+}
+
+// =============================================================================
+// FAddEditableTextBoxToWidgetAction
+// =============================================================================
+
+bool FAddEditableTextBoxToWidgetAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	if (!Params->HasField(TEXT("widget_name")))
+	{
+		OutError = TEXT("Missing 'widget_name' parameter");
+		return false;
+	}
+	if (!Params->HasField(TEXT("text_box_name")))
+	{
+		OutError = TEXT("Missing 'text_box_name' parameter");
+		return false;
+	}
+	return true;
+}
+
+TSharedPtr<FJsonObject> FAddEditableTextBoxToWidgetAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	FString BlueprintName = Params->GetStringField(TEXT("widget_name"));
+	FString TextBoxName = Params->GetStringField(TEXT("text_box_name"));
+
+	UWidgetBlueprint* WidgetBlueprint = FindWidgetBlueprintByName(BlueprintName);
+	if (!WidgetBlueprint)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(FString::Printf(
+			TEXT("Widget Blueprint '%s' not found in /Game/UI, /Game/Widgets, or /Game"), *BlueprintName));
+	}
+	if (WidgetBlueprint->WidgetTree->FindWidget(FName(*TextBoxName)))
+	{
+		return FMCPCommonUtils::CreateErrorResponse(FString::Printf(
+			TEXT("A widget named '%s' already exists in '%s'"), *TextBoxName, *BlueprintName));
+	}
+
+	FString Error;
+	UPanelWidget* Parent = ResolveParentPanel(WidgetBlueprint, Params->HasField(TEXT("parent_widget")) ? Params->GetStringField(TEXT("parent_widget")) : FString(), Error);
+	if (!Parent)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(Error);
+	}
+
+	UEditableTextBox* TextBox = WidgetBlueprint->WidgetTree->ConstructWidget<UEditableTextBox>(UEditableTextBox::StaticClass(), *TextBoxName);
+	if (!TextBox)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(TEXT("Failed to create Editable Text Box widget"));
+	}
+
+	FString Text;
+	if (Params->TryGetStringField(TEXT("text"), Text))
+	{
+		TextBox->SetText(FText::FromString(Text));
+	}
+	FString HintText;
+	if (Params->TryGetStringField(TEXT("hint_text"), HintText))
+	{
+		TextBox->SetHintText(FText::FromString(HintText));
+	}
+	bool bFlag = false;
+	if (Params->TryGetBoolField(TEXT("is_password"), bFlag))
+	{
+		TextBox->SetIsPassword(bFlag);
+	}
+	if (Params->TryGetBoolField(TEXT("is_read_only"), bFlag))
+	{
+		TextBox->SetIsReadOnly(bFlag);
+	}
+
+	UPanelSlot* Slot = Parent->AddChild(TextBox);
+	if (!Slot)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(TEXT("Failed to add Editable Text Box to parent panel"));
+	}
+	ApplyCanvasSlotLayout(Slot, Params);
+
+	CompileAndSaveWidgetBlueprint(WidgetBlueprint);
+
+	TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+	ResultObj->SetBoolField(TEXT("success"), true);
+	ResultObj->SetStringField(TEXT("widget_name"), TextBoxName);
+	ResultObj->SetStringField(TEXT("text"), Text);
+	return ResultObj;
 }
 
 // =============================================================================

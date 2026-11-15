@@ -161,6 +161,39 @@ def get_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="create_data_table",
+            description=(
+                "Create an empty Data Table asset. Pass 'columns' (e.g. [{\"name\": \"Value\", \"type\": \"Float\"}]) "
+                "to also create a User Defined Struct S_<Name without DT_> (DT_Example -> S_Example) with those "
+                "fields and use it as the row struct, or pass 'row_struct' to use an existing struct (exactly one "
+                "of the two). Column types: Boolean, Integer, Int64, Float, String, Name, Text, Vector, Vector2D, "
+                "Rotator, Transform, an enum or struct name; prefix 'Array of ' for arrays. Existing assets are not "
+                "overwritten. Add rows afterwards with set_data_table_row (create_if_missing=true). Rejected while "
+                "PIE runs."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "name": {"type": "string", "description": "Asset name, e.g. DT_Example (letters, digits, underscores)"},
+                    "path": {"type": "string", "description": "Content folder for the table (default /Game/Data)"},
+                    "columns": {
+                        "type": "array",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "name": {"type": "string", "description": "Column name"},
+                                "type": {"type": "string", "description": "Column type, e.g. Float"}
+                            },
+                            "required": ["name", "type"]
+                        },
+                        "description": "Columns of the new row struct (creates S_<Name>)"
+                    },
+                    "row_struct": {"type": "string", "description": "Existing row struct name or path (e.g. /Game/Data/S_Item)"}
+                },
+                "required": ["name"]
+            }
+        ),
+        Tool(
             name="set_data_table_row",
             description=(
                 "Edit a Data Table row (counterpart of get_data_table_info): update some columns, add a row or "
@@ -372,6 +405,7 @@ TOOL_HANDLERS = {
     "get_enum_info": "get_enum_info",
     "get_curve_info": "get_curve_info",
     "get_data_table_info": "get_data_table_info",
+    "create_data_table": "create_data_table",
     "set_data_table_row": "set_data_table_row",
     "get_object_properties": "get_object_properties",
     "get_project_config": "get_project_config",

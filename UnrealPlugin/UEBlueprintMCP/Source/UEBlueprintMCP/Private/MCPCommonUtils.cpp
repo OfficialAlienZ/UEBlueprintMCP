@@ -17,6 +17,7 @@
 #include "K2Node_Event.h"
 #include "K2Node_ComponentBoundEvent.h"
 #include "K2Node_CallFunction.h"
+#include "K2Node_CallArrayFunction.h"
 #include "K2Node_VariableGet.h"
 #include "K2Node_VariableSet.h"
 #include "K2Node_CustomEvent.h"
@@ -1055,7 +1056,18 @@ UK2Node_CallFunction* FMCPCommonUtils::CreateFunctionCallNode(UEdGraph* Graph, U
 		return nullptr;
 	}
 
-	UK2Node_CallFunction* FunctionNode = NewObject<UK2Node_CallFunction>(Graph);
+	// Functions with ArrayParm metadata (KismetArrayLibrary: Array_Length, Array_Add, ...) must use
+	// UK2Node_CallArrayFunction, as the engine's action menu does. It resolves the wildcard array pin
+	// when wired. A plain UK2Node_CallFunction keeps the wildcard unresolved and the graph fails to compile.
+	UK2Node_CallFunction* FunctionNode = nullptr;
+	if (Function->HasMetaData(TEXT("ArrayParm")))
+	{
+		FunctionNode = NewObject<UK2Node_CallArrayFunction>(Graph);
+	}
+	else
+	{
+		FunctionNode = NewObject<UK2Node_CallFunction>(Graph);
+	}
 	if (!FunctionNode)
 	{
 		return nullptr;

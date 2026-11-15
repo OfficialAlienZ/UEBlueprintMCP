@@ -40,8 +40,9 @@ UEBlueprintMCP/
 │       │       ├── InspectionActions.h  # Read-only introspection (get_blueprint_info)
 │       │       ├── AIActions.h          # Behavior Tree / Blackboard introspection
 │       │       ├── AssetInspectionActions.h # Enum / Curve / Data Table introspection, get_asset_timestamps (asset file mtime, UTC)
-│       │       ├── DataTableActions.h   # set_data_table_row (edit/add/delete Data Table rows)
+│       │       ├── DataTableActions.h   # create_data_table (new asset + row struct from columns), set_data_table_row (edit/add/delete rows)
 │       │       ├── SearchActions.h      # find_in_blueprints (global text search across Blueprint assets)
+│       │       ├── StructNodeActions.h  # add_struct_node (Break/Make Struct), add_get_data_table_row_node (special K2Nodes)
 │       │       ├── ObjectInspectionActions.h # get_object_properties (full UPROPERTY export), get_project_config (ini)
 │       │       ├── PIEActions.h         # PIE start/stop/status, Output Log, console commands
 │       │       ├── GameplayActions.h    # Runtime gameplay driving in PIE (call_actor_function, inject_input)

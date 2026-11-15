@@ -4,6 +4,12 @@
 #include "MCPInspectionUtils.h"
 #include "Engine/DataTable.h"
 #include "Engine/CompositeDataTable.h"
+#include "Engine/UserDefinedStruct.h"
+#include "EdGraphSchema_K2.h"
+#include "Kismet2/StructureEditorUtils.h"
+#include "UserDefinedStructure/UserDefinedStructEditorData.h"
+#include "AssetRegistry/AssetRegistryModule.h"
+#include "EditorAssetLibrary.h"
 #include "Internationalization/TextPackageNamespaceUtil.h"
 #include "JsonObjectConverter.h"
 #include "UObject/StructOnScope.h"
@@ -385,5 +391,399 @@ TSharedPtr<FJsonObject> FSetDataTableRowAction::ExecuteInternal(const TSharedPtr
 	{
 		Result->SetObjectField(TEXT("values"), FMCPInspectionUtils::StructValueToJson(RowStruct, *NewRow));
 	}
+	return CreateSuccessResponse(Result);
+}
+
+// =============================================================================
+// FCreateDataTableAction
+// =============================================================================
+
+namespace
+{
+	struct FDTColumn
+	{
+		FString Name;
+		FEdGraphPinType PinType;
+	};
+
+	/** Letters, digits and underscores; must not start with a digit. Used for asset names and column names. */
+	bool DT_IsValidIdentifier(const FString& Name)
+	{
+		if (Name.IsEmpty() || FChar::IsDigit(Name[0]))
+		{
+			return false;
+		}
+		for (const TCHAR Char : Name)
+		{
+			if (!FChar::IsAlnum(Char) && Char != TEXT('_'))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	FString DT_NormalizeFolder(const FString& Path)
+	{
+		FString Result = Path.TrimStartAndEnd();
+		if (Result.IsEmpty())
+		{
+			return TEXT("/Game/Data");
+		}
+		while (Result.Len() > 1 && Result.EndsWith(TEXT("/")))
+		{
+			Result = Result.LeftChop(1);
+		}
+		return Result;
+	}
+
+	bool DT_IsValidFolder(const FString& Path)
+	{
+		if (!(Path == TEXT("/Game") || Path.StartsWith(TEXT("/Game/"))) || Path.Contains(TEXT("//")))
+		{
+			return false;
+		}
+		for (const TCHAR Char : Path)
+		{
+			if (!FChar::IsAlnum(Char) && Char != TEXT('_') && Char != TEXT('/'))
+			{
+				return false;
+			}
+		}
+		return true;
+	}
+
+	/** DT_Example -> S_Example (the row struct created for the 'columns' parameter). */
+	FString DT_RowStructName(const FString& TableName)
+	{
+		const FString Base = TableName.StartsWith(TEXT("DT_")) ? TableName.Mid(3) : TableName;
+		return TEXT("S_") + (Base.IsEmpty() ? TEXT("Row") : Base);
+	}
+
+	bool DT_AssetExists(const FString& PackagePath)
+	{
+		return FindPackage(nullptr, *PackagePath) != nullptr || UEditorAssetLibrary::DoesAssetExist(PackagePath);
+	}
+
+	/** Remove a half-built asset from memory after a failed creation so its name can be reused. */
+	void DT_DiscardAsset(UObject* Asset)
+	{
+		if (!Asset)
+		{
+			return;
+		}
+		UPackage* Package = Asset->GetOutermost();
+		Asset->ClearFlags(RF_Public | RF_Standalone);
+		MCPCompat::MarkGarbage(Asset);
+		if (Package)
+		{
+			Package->ClearFlags(RF_Public | RF_Standalone);
+			MCPCompat::MarkGarbage(Package);
+		}
+	}
+
+	/**
+	 * Column type name -> pin type. Primitives, math structs, enum or struct names.
+	 * "Array of X" / "X[]" makes an array column.
+	 */
+	bool DT_ParseColumnType(const FString& TypeArg, FEdGraphPinType& OutType, FString& OutError)
+	{
+		FString TypeName = TypeArg.TrimStartAndEnd();
+		bool bIsArray = false;
+		if (TypeName.StartsWith(TEXT("Array of "), ESearchCase::IgnoreCase))
+		{
+			bIsArray = true;
+			TypeName = TypeName.Mid(9).TrimStartAndEnd();
+		}
+		else if (TypeName.EndsWith(TEXT("[]")))
+		{
+			bIsArray = true;
+			TypeName = TypeName.LeftChop(2).TrimStartAndEnd();
+		}
+
+		OutType = FEdGraphPinType();
+		const auto Is = [&TypeName](const TCHAR* Value) { return TypeName.Equals(Value, ESearchCase::IgnoreCase); };
+		const auto SetStruct = [&OutType](UScriptStruct* Struct)
+		{
+			OutType.PinCategory = UEdGraphSchema_K2::PC_Struct;
+			OutType.PinSubCategoryObject = Struct;
+		};
+
+		if (Is(TEXT("Float")) || Is(TEXT("Double")) || Is(TEXT("Real")))
+		{
+			MCPCompat::SetRealPinType(OutType);
+		}
+		else if (Is(TEXT("Boolean")) || Is(TEXT("Bool")))
+		{
+			OutType.PinCategory = UEdGraphSchema_K2::PC_Boolean;
+		}
+		else if (Is(TEXT("Integer")) || Is(TEXT("Int")))
+		{
+			OutType.PinCategory = UEdGraphSchema_K2::PC_Int;
+		}
+		else if (Is(TEXT("Int64")))
+		{
+			OutType.PinCategory = UEdGraphSchema_K2::PC_Int64;
+		}
+		else if (Is(TEXT("String")))
+		{
+			OutType.PinCategory = UEdGraphSchema_K2::PC_String;
+		}
+		else if (Is(TEXT("Name")))
+		{
+			OutType.PinCategory = UEdGraphSchema_K2::PC_Name;
+		}
+		else if (Is(TEXT("Text")))
+		{
+			OutType.PinCategory = UEdGraphSchema_K2::PC_Text;
+		}
+		else if (Is(TEXT("Vector")))
+		{
+			SetStruct(TBaseStructure<FVector>::Get());
+		}
+		else if (Is(TEXT("Vector2D")))
+		{
+			SetStruct(TBaseStructure<FVector2D>::Get());
+		}
+		else if (Is(TEXT("Rotator")))
+		{
+			SetStruct(TBaseStructure<FRotator>::Get());
+		}
+		else if (Is(TEXT("Transform")))
+		{
+			SetStruct(TBaseStructure<FTransform>::Get());
+		}
+		else if (UEnum* Enum = FMCPInspectionUtils::FindEnum(TypeName))
+		{
+			OutType.PinCategory = UEdGraphSchema_K2::PC_Byte;
+			OutType.PinSubCategoryObject = Enum;
+		}
+		else if (UScriptStruct* Struct = FMCPInspectionUtils::FindStruct(TypeName))
+		{
+			SetStruct(Struct);
+		}
+		else
+		{
+			OutError = FString::Printf(TEXT("Unsupported column type '%s'. Supported: Boolean, Integer, Int64, Float, String, Name, Text, Vector, Vector2D, Rotator, Transform, an enum or struct name. Prefix 'Array of ' for arrays."), *TypeArg);
+			return false;
+		}
+
+		if (bIsArray)
+		{
+			OutType.ContainerType = EPinContainerType::Array;
+		}
+		return true;
+	}
+
+	bool DT_ParseColumns(const TArray<TSharedPtr<FJsonValue>>& Items, TArray<FDTColumn>& OutColumns, FString& OutError)
+	{
+		if (Items.Num() == 0)
+		{
+			OutError = TEXT("'columns' is empty. Pass at least one column, e.g. [{\"name\": \"Value\", \"type\": \"Float\"}].");
+			return false;
+		}
+
+		for (int32 Index = 0; Index < Items.Num(); ++Index)
+		{
+			const TSharedPtr<FJsonObject>* Object = nullptr;
+			FString ColumnName, TypeName;
+			if (!Items[Index].IsValid() || !Items[Index]->TryGetObject(Object) || !Object || !Object->IsValid()
+				|| !(*Object)->TryGetStringField(TEXT("name"), ColumnName) || !(*Object)->TryGetStringField(TEXT("type"), TypeName))
+			{
+				OutError = FString::Printf(TEXT("columns[%d] must be an object with string fields 'name' and 'type'."), Index);
+				return false;
+			}
+
+			if (!DT_IsValidIdentifier(ColumnName))
+			{
+				OutError = FString::Printf(TEXT("Invalid column name '%s'. Use letters, digits and underscores, not starting with a digit."), *ColumnName);
+				return false;
+			}
+			for (const FDTColumn& Existing : OutColumns)
+			{
+				if (Existing.Name.Equals(ColumnName, ESearchCase::IgnoreCase))
+				{
+					OutError = FString::Printf(TEXT("Duplicate column name '%s'."), *ColumnName);
+					return false;
+				}
+			}
+
+			FDTColumn Column;
+			Column.Name = ColumnName;
+			if (!DT_ParseColumnType(TypeName, Column.PinType, OutError))
+			{
+				return false;
+			}
+			OutColumns.Add(Column);
+		}
+		return true;
+	}
+}
+
+bool FCreateDataTableAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	FString Name;
+	if (!GetRequiredString(Params, TEXT("name"), Name, OutError))
+	{
+		return false;
+	}
+	if (!DT_IsValidIdentifier(Name))
+	{
+		OutError = FString::Printf(TEXT("Invalid name '%s'. Use letters, digits and underscores, not starting with a digit (e.g. DT_Example)."), *Name);
+		return false;
+	}
+
+	const FString Folder = DT_NormalizeFolder(GetOptionalString(Params, TEXT("path"), TEXT("/Game/Data")));
+	if (!DT_IsValidFolder(Folder))
+	{
+		OutError = FString::Printf(TEXT("Invalid path '%s'. Use a folder inside the project Content, e.g. /Game/Data."), *Folder);
+		return false;
+	}
+
+	const FString PackagePath = Folder / Name;
+	if (DT_AssetExists(PackagePath))
+	{
+		OutError = FString::Printf(TEXT("Asset '%s' already exists. Pick another name or delete it in the editor first; existing Data Tables are not overwritten."), *PackagePath);
+		return false;
+	}
+
+	const bool bHasColumns = Params->HasField(TEXT("columns"));
+	const bool bHasRowStruct = Params->HasField(TEXT("row_struct"));
+	if (bHasColumns == bHasRowStruct)
+	{
+		OutError = TEXT("Pass exactly one of 'columns' (creates a row struct from them) or 'row_struct' (uses an existing struct).");
+		return false;
+	}
+
+	if (bHasRowStruct)
+	{
+		FString RowStructName;
+		if (!GetRequiredString(Params, TEXT("row_struct"), RowStructName, OutError))
+		{
+			return false;
+		}
+		if (!FMCPInspectionUtils::FindStruct(RowStructName))
+		{
+			OutError = FString::Printf(TEXT("Row struct '%s' not found. Pass a struct name or path such as /Game/Data/S_Item."), *RowStructName);
+			return false;
+		}
+		return true;
+	}
+
+	const TArray<TSharedPtr<FJsonValue>>* Items = GetOptionalArray(Params, TEXT("columns"));
+	if (!Items)
+	{
+		OutError = TEXT("'columns' must be an array of {name, type} objects.");
+		return false;
+	}
+	TArray<FDTColumn> Columns;
+	if (!DT_ParseColumns(*Items, Columns, OutError))
+	{
+		return false;
+	}
+
+	const FString StructPackagePath = Folder / DT_RowStructName(Name);
+	if (DT_AssetExists(StructPackagePath))
+	{
+		OutError = FString::Printf(TEXT("Row struct '%s' already exists. Pass it with 'row_struct' instead, or use another table name."), *StructPackagePath);
+		return false;
+	}
+	return true;
+}
+
+TSharedPtr<FJsonObject> FCreateDataTableAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	const FString Name = GetOptionalString(Params, TEXT("name"));
+	const FString Folder = DT_NormalizeFolder(GetOptionalString(Params, TEXT("path"), TEXT("/Game/Data")));
+	const FString PackagePath = Folder / Name;
+
+	UScriptStruct* RowStruct = nullptr;
+	bool bCreatedStruct = false;
+
+	if (Params->HasField(TEXT("row_struct")))
+	{
+		const FString RowStructName = GetOptionalString(Params, TEXT("row_struct"));
+		RowStruct = FMCPInspectionUtils::FindStruct(RowStructName);
+		if (!RowStruct)
+		{
+			return CreateErrorResponse(FString::Printf(TEXT("Row struct '%s' not found."), *RowStructName), TEXT("not_found"));
+		}
+	}
+	else
+	{
+		const TArray<TSharedPtr<FJsonValue>>* Items = GetOptionalArray(Params, TEXT("columns"));
+		TArray<FDTColumn> Columns;
+		FString Error;
+		if (!Items || !DT_ParseColumns(*Items, Columns, Error))
+		{
+			return CreateErrorResponse(Error.IsEmpty() ? TEXT("'columns' is invalid.") : Error, TEXT("validation_failed"));
+		}
+
+		// 1. Row struct (User Defined Struct) with one field per column.
+		const FString StructName = DT_RowStructName(Name);
+		const FString StructPackagePath = Folder / StructName;
+		UPackage* StructPackage = CreatePackage(*StructPackagePath);
+		UUserDefinedStruct* NewStruct = FStructureEditorUtils::CreateUserDefinedStruct(StructPackage, FName(*StructName), RF_Public | RF_Standalone);
+		if (!NewStruct)
+		{
+			return CreateErrorResponse(FString::Printf(TEXT("Failed to create row struct '%s'."), *StructPackagePath), TEXT("execution_failed"));
+		}
+
+		for (const FDTColumn& Column : Columns)
+		{
+			if (!FStructureEditorUtils::AddVariable(NewStruct, Column.PinType))
+			{
+				DT_DiscardAsset(NewStruct);
+				return CreateErrorResponse(FString::Printf(TEXT("Failed to add column '%s' to '%s'."), *Column.Name, *StructPackagePath), TEXT("execution_failed"));
+			}
+			// AddVariable gives the new field a placeholder name; the last field is the one just added.
+			const FGuid VarGuid = FStructureEditorUtils::GetVarDesc(NewStruct).Last().VarGuid;
+			if (!FStructureEditorUtils::RenameVariable(NewStruct, VarGuid, Column.Name))
+			{
+				DT_DiscardAsset(NewStruct);
+				return CreateErrorResponse(FString::Printf(TEXT("Failed to name column '%s'."), *Column.Name), TEXT("execution_failed"));
+			}
+		}
+		FStructureEditorUtils::CompileStructure(NewStruct);
+
+		FAssetRegistryModule::AssetCreated(NewStruct);
+		NewStruct->MarkPackageDirty();
+		const FString StructFilename = FPackageName::LongPackageNameToFilename(StructPackagePath, FPackageName::GetAssetPackageExtension());
+		if (!MCPCompat::SavePackageToDisk(StructPackage, NewStruct, StructFilename, RF_Public | RF_Standalone))
+		{
+			return CreateErrorResponse(FString::Printf(TEXT("Failed to save row struct to '%s'."), *StructFilename), TEXT("execution_failed"));
+		}
+		RowStruct = NewStruct;
+		bCreatedStruct = true;
+	}
+
+	// 2. The Data Table itself, empty, with the row struct assigned.
+	UPackage* Package = CreatePackage(*PackagePath);
+	UDataTable* Table = NewObject<UDataTable>(Package, FName(*Name), RF_Public | RF_Standalone);
+	if (!Table)
+	{
+		return CreateErrorResponse(FString::Printf(TEXT("Failed to create Data Table '%s'."), *PackagePath), TEXT("execution_failed"));
+	}
+	Table->RowStruct = RowStruct;
+
+	FAssetRegistryModule::AssetCreated(Table);
+	Table->MarkPackageDirty();
+	const FString Filename = FPackageName::LongPackageNameToFilename(PackagePath, FPackageName::GetAssetPackageExtension());
+	if (!MCPCompat::SavePackageToDisk(Package, Table, Filename, RF_Public | RF_Standalone))
+	{
+		return CreateErrorResponse(FString::Printf(TEXT("Failed to save Data Table to '%s'."), *Filename), TEXT("execution_failed"));
+	}
+
+	TSharedPtr<FJsonObject> Result = MakeShared<FJsonObject>();
+	Result->SetStringField(TEXT("name"), Name);
+	Result->SetStringField(TEXT("path"), PackagePath);
+	Result->SetStringField(TEXT("row_struct"), RowStruct->GetPathName());
+	Result->SetBoolField(TEXT("created_row_struct"), bCreatedStruct);
+	TArray<TSharedPtr<FJsonValue>> ColumnValues;
+	for (TFieldIterator<FProperty> It(RowStruct); It; ++It)
+	{
+		ColumnValues.Add(MakeShared<FJsonValueString>(RowStruct->GetAuthoredNameForField(*It)));
+	}
+	Result->SetArrayField(TEXT("columns"), ColumnValues);
 	return CreateSuccessResponse(Result);
 }

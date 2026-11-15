@@ -59,6 +59,25 @@ def get_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="add_editable_text_box_to_widget",
+            description="Add an Editable Text Box (text input field) to a UMG Widget Blueprint (root Canvas Panel by default, or inside parent_widget). Supports text, hint_text, is_password and is_read_only.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "widget_name": {"type": "string", "description": "Name of the Widget Blueprint"},
+                    "text_box_name": {"type": "string", "description": "Name for the Editable Text Box"},
+                    "parent_widget": {"type": "string", "description": "Name of an existing panel widget to add the text box to (default: root)"},
+                    "text": {"type": "string", "description": "Initial text content"},
+                    "hint_text": {"type": "string", "description": "Hint text shown while empty"},
+                    "is_password": {"type": "boolean", "description": "Mask the input as a password"},
+                    "is_read_only": {"type": "boolean", "description": "Make the text box read-only"},
+                    "position": {"type": "array", "items": {"type": "number"}, "description": "[X, Y] (Canvas Panel parents only)"},
+                    "size": {"type": "array", "items": {"type": "number"}, "description": "[Width, Height] (Canvas Panel parents only)"}
+                },
+                "required": ["widget_name", "text_box_name"]
+            }
+        ),
+        Tool(
             name="add_button_to_widget",
             description="Add a Button widget to a UMG Widget Blueprint.",
             inputSchema={
@@ -174,6 +193,7 @@ TOOL_HANDLERS = {
     "create_umg_widget_blueprint": "create_umg_widget_blueprint",
     "add_text_block_to_widget": "add_text_block_to_widget",
     "add_button_to_widget": "add_button_to_widget",
+    "add_editable_text_box_to_widget": "add_editable_text_box_to_widget",
     "add_image_to_widget": "add_image_to_widget",
     "duplicate_widget": "duplicate_widget",
     "remove_widget": "remove_widget",

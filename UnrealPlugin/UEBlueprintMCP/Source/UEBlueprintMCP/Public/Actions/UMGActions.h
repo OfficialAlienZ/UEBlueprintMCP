@@ -37,6 +37,19 @@ protected:
 };
 
 /**
+ * Add an Editable Text Box (text input) to a Widget Blueprint (optionally inside a given panel)
+ */
+class UEBLUEPRINTMCP_API FAddEditableTextBoxToWidgetAction : public FEditorAction
+{
+public:
+	virtual FString GetActionName() const override { return TEXT("AddEditableTextBoxToWidget"); }
+
+protected:
+	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
+	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
+};
+
+/**
  * Add a Button to a Widget Blueprint
  */
 class UEBLUEPRINTMCP_API FAddButtonToWidgetAction : public FEditorAction

@@ -166,7 +166,8 @@ def get_tools() -> list[Tool]:
             description=(
                 "Create a new function graph in a Blueprint with inputs/outputs. Parameter types: Float, Boolean, "
                 "Integer, String, Name, Text, Vector, Rotator, Transform, Object / Class (with a 'class' key), or a "
-                "class / Blueprint name directly as the type (e.g. 'Actor', 'Character' = object reference). "
+                "class / Blueprint name directly as the type (e.g. 'Actor', 'Character' = object reference), or an enum / "
+                "struct name directly (e.g. 'E_RarityType', 'S_SCPNInventoryItem'; or type 'Enum' / 'Struct' with a 'class' key). "
                 "Unknown types are rejected."
             ),
             inputSchema={
@@ -228,7 +229,7 @@ def get_tools() -> list[Tool]:
                 "properties": {
                     "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
                     "variable_name": {"type": "string", "description": "Name of the variable"},
-                    "variable_type": {"type": "string", "description": "Type (Boolean, Integer, Float, Vector, etc.)"},
+                    "variable_type": {"type": "string", "description": "Type (Boolean, Integer, Float, String, Name, Text, Vector, Vector2D, EventDispatcher, Texture, Object:<Class>, etc.). Texture = Texture Object Reference (UTexture2D). Object:<Class> = object reference to any class (Object:StaticMesh, Object:/Script/Engine.Material, Object:BP_Objective). Wrap in an array container for an Array variable: 'Array of String', 'String[]', 'Array<String>' or 'String Array'"},
                     "is_exposed": {"type": "boolean", "description": "Expose to editor"},
                     "replicated": {"type": "boolean", "description": "Tick the Replicated checkbox (false clears it)"},
                     "replication_condition": {"type": "string", "description": "Replication condition, e.g. None, InitialOnly, OwnerOnly, SkipOwner, SimulatedOnly, AutonomousOnly, Custom. Implies replicated=true"}
@@ -369,6 +370,78 @@ def get_tools() -> list[Tool]:
                 "required": ["blueprint_name"]
             }
         ),
+        Tool(
+            name="add_switch_string_case",
+            description=(
+                "Add a case to an existing Switch on String node (node_id). The case_value becomes a new exec output pin "
+                "(returned as case_pin). Existing cases and their wires are kept. Fails if the case already exists."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
+                    "node_id": {"type": "string", "description": "GUID of the Switch on String node"},
+                    "case_value": {"type": "string", "description": "Case string. Must match the value the switch receives"},
+                    "graph_name": {"type": "string", "description": "Optional function graph name (defaults to event graph)"}
+                },
+                "required": ["blueprint_name", "node_id", "case_value"]
+            }
+        ),
+        Tool(
+            name="add_return_node",
+            description=(
+                "Add a Return Node to a function graph. Its inputs are the function outputs: set them "
+                "with set_node_pin_default (object pins take an asset path) and wire the exec input from a case or "
+                "branch with connect_blueprint_nodes. Returns node_id and the input pin names."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
+                    "graph_name": {"type": "string", "description": "Function graph name (required: Return nodes only exist in function graphs)"},
+                    "node_position": {"type": "array", "items": {"type": "number"}, "description": "[X, Y] position. Omit to auto-place"}
+                },
+                "required": ["blueprint_name", "graph_name"]
+            }
+        ),
+        Tool(
+            name="add_struct_node",
+            description=(
+                "Add a Break Struct or Make Struct node (special nodes; add_blueprint_function_node cannot create them). "
+                "Returns node_id and the pins; User Defined Struct pin names carry a GUID suffix, use the returned 'name' "
+                "values when connecting. Structs with a native Break/Make function (Vector, Transform...) are rejected: use the function node."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
+                    "struct_type": {"type": "string", "description": "User Defined Struct name or path (S_Item, /Game/Data/S_Item) or native struct (/Script/Engine.HitResult)"},
+                    "mode": {"type": "string", "enum": ["break", "make"], "description": "'break' (default) splits a struct into members, 'make' builds one"},
+                    "graph_name": {"type": "string", "description": "Optional function graph name (defaults to event graph)"},
+                    "node_position": {"type": "array", "items": {"type": "number"}, "description": "[X, Y] position. Omit to auto-place"}
+                },
+                "required": ["blueprint_name", "struct_type"]
+            }
+        ),
+        Tool(
+            name="add_get_data_table_row_node",
+            description=(
+                "Add a 'Get Data Table Row' node (special node; add_blueprint_function_node cannot create it). "
+                "Pass data_table to set the DataTable pin so the output row pin takes the table's row struct; then wire it "
+                "into add_struct_node (break) to read columns. Pins: execute, DataTable, RowName, then, RowNotFound, OutRow."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
+                    "data_table": {"type": "string", "description": "Optional Data Table asset name or path (/Game/Data/DT_Items). Omit to wire the DataTable pin yourself"},
+                    "row_name": {"type": "string", "description": "Optional row name (must exist in data_table). Defaults to the first row"},
+                    "graph_name": {"type": "string", "description": "Optional function graph name (defaults to event graph)"},
+                    "node_position": {"type": "array", "items": {"type": "number"}, "description": "[X, Y] position. Omit to auto-place"}
+                },
+                "required": ["blueprint_name"]
+            }
+        ),
 
         # =====================================================================
         # Flow Control
@@ -440,6 +513,41 @@ def get_tools() -> list[Tool]:
                     "connections": {
                         "type": "array",
                         "description": "Batch mode: list of connections applied in order",
+                        "items": {
+                            "type": "object",
+                            "properties": {
+                                "source_node_id": {"type": "string"},
+                                "source_pin": {"type": "string"},
+                                "target_node_id": {"type": "string"},
+                                "target_pin": {"type": "string"}
+                            },
+                            "required": ["source_node_id", "source_pin", "target_node_id", "target_pin"]
+                        }
+                    },
+                    "graph_name": {"type": "string", "description": "Optional function graph name"}
+                },
+                "required": ["blueprint_name"]
+            }
+        ),
+        Tool(
+            name="disconnect_blueprint_nodes",
+            description=(
+                "Remove a single wire between two pins (the inverse of connect_blueprint_nodes). Give "
+                "source_node_id, source_pin, target_node_id and target_pin (source = output pin, target = input pin, "
+                "same as connect). To remove several wires, pass them via 'connections' (array of those four fields) "
+                "in one call. Pins that are not linked to each other are reported as errors."
+            ),
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "blueprint_name": {"type": "string", "description": "Name of the Blueprint"},
+                    "source_node_id": {"type": "string", "description": "GUID of the output-side node"},
+                    "source_pin": {"type": "string", "description": "Name of the output pin"},
+                    "target_node_id": {"type": "string", "description": "GUID of the input-side node"},
+                    "target_pin": {"type": "string", "description": "Name of the input pin"},
+                    "connections": {
+                        "type": "array",
+                        "description": "Batch mode: list of wires to remove, applied in order",
                         "items": {
                             "type": "object",
                             "properties": {
@@ -579,6 +687,10 @@ TOOL_HANDLERS = {
     "add_blueprint_self_reference": "add_blueprint_self_reference",
     "add_blueprint_cast_node": "add_blueprint_cast_node",
     "add_array_get_node": "add_array_get_node",
+    "add_switch_string_case": "add_switch_string_case",
+    "add_return_node": "add_return_node",
+    "add_struct_node": "add_struct_node",
+    "add_get_data_table_row_node": "add_get_data_table_row_node",
     # Flow Control
     "add_blueprint_branch_node": "add_blueprint_branch_node",
     "add_macro_instance_node": "add_macro_instance_node",
@@ -586,6 +698,7 @@ TOOL_HANDLERS = {
     "add_spawn_actor_from_class_node": "add_spawn_actor_from_class_node",
     # Graph Operations
     "connect_blueprint_nodes": "connect_blueprint_nodes",
+    "disconnect_blueprint_nodes": "disconnect_blueprint_nodes",
     "find_blueprint_nodes": "find_blueprint_nodes",
     "find_in_blueprints": "find_in_blueprints",
     "delete_blueprint_node": "delete_blueprint_node",
