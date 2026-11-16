@@ -248,6 +248,7 @@ void UMCPBridge::RegisterActions()
 	ActionHandlers.Add(TEXT("add_image_to_widget"), MakeShared<FAddImageToWidgetAction>());
 	ActionHandlers.Add(TEXT("duplicate_widget"), MakeShared<FDuplicateWidgetAction>());
 	ActionHandlers.Add(TEXT("remove_widget"), MakeShared<FRemoveWidgetAction>());
+	ActionHandlers.Add(TEXT("rename_widget"), MakeShared<FRenameWidgetAction>());
 	ActionHandlers.Add(TEXT("bind_widget_event"), MakeShared<FBindWidgetEventAction>());
 	ActionHandlers.Add(TEXT("add_widget_to_viewport"), MakeShared<FAddWidgetToViewportAction>());
 	ActionHandlers.Add(TEXT("set_text_block_binding"), MakeShared<FSetTextBlockBindingAction>());

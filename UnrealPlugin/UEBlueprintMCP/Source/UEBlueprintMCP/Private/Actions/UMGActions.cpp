@@ -686,6 +686,7 @@ TSharedPtr<FJsonObject> FDuplicateWidgetAction::ExecuteInternal(const TSharedPtr
 		return FMCPCommonUtils::CreateErrorResponse(TEXT("Failed to duplicate widget"));
 	}
 	NewWidget->SetFlags(RF_Transactional);
+	NewWidget->SetDisplayLabel(NewName); // editor label is copied from the source by StaticDuplicateObject
 	NewWidget->Slot = nullptr; // duplicated pointer still references the source's slot
 
 	UPanelSlot* NewSlot = Parent->AddChild(NewWidget);
@@ -718,6 +719,81 @@ TSharedPtr<FJsonObject> FDuplicateWidgetAction::ExecuteInternal(const TSharedPtr
 	ResultObj->SetStringField(TEXT("widget_name"), NewName);
 	ResultObj->SetStringField(TEXT("class"), NewWidget->GetClass()->GetName());
 	ResultObj->SetStringField(TEXT("parent"), Parent->GetName());
+	return ResultObj;
+}
+
+// =============================================================================
+// FRenameWidgetAction
+// =============================================================================
+
+bool FRenameWidgetAction::Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError)
+{
+	for (const TCHAR* Field : { TEXT("widget_name"), TEXT("target_widget"), TEXT("new_name") })
+	{
+		if (!Params->HasField(Field))
+		{
+			OutError = FString::Printf(TEXT("Missing '%s' parameter"), Field);
+			return false;
+		}
+	}
+	return true;
+}
+
+TSharedPtr<FJsonObject> FRenameWidgetAction::ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context)
+{
+	FString BlueprintName = Params->GetStringField(TEXT("widget_name"));
+	FString TargetName = Params->GetStringField(TEXT("target_widget"));
+	FString NewName = Params->GetStringField(TEXT("new_name"));
+
+	if (NewName.IsEmpty())
+	{
+		return FMCPCommonUtils::CreateErrorResponse(TEXT("'new_name' must not be empty"));
+	}
+
+	UWidgetBlueprint* WidgetBlueprint = FindWidgetBlueprintByName(BlueprintName);
+	if (!WidgetBlueprint)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(FString::Printf(
+			TEXT("Widget Blueprint '%s' not found in /Game/UI, /Game/Widgets, or /Game"), *BlueprintName));
+	}
+
+	UWidgetTree* Tree = WidgetBlueprint->WidgetTree;
+	UWidget* Target = Tree->FindWidget(FName(*TargetName));
+	if (!Target)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(FString::Printf(
+			TEXT("Widget '%s' not found in '%s'"), *TargetName, *BlueprintName));
+	}
+	if (Target == Tree->RootWidget)
+	{
+		return FMCPCommonUtils::CreateErrorResponse(TEXT("The root widget cannot be renamed"));
+	}
+	if (Tree->FindWidget(FName(*NewName)))
+	{
+		return FMCPCommonUtils::CreateErrorResponse(FString::Printf(
+			TEXT("A widget named '%s' already exists in '%s'"), *NewName, *BlueprintName));
+	}
+
+	const bool bWasVariable = Target->bIsVariable;
+	if (!Target->Rename(*NewName, Tree, REN_DontCreateRedirectors))
+	{
+		return FMCPCommonUtils::CreateErrorResponse(FString::Printf(
+			TEXT("Failed to rename '%s' to '%s'"), *TargetName, *NewName));
+	}
+	// The designer and graph pick up the editor label, not the FName: keep both in sync
+	Target->SetDisplayLabel(NewName);
+
+	CompileAndSaveWidgetBlueprint(WidgetBlueprint);
+
+	TSharedPtr<FJsonObject> ResultObj = MakeShared<FJsonObject>();
+	ResultObj->SetBoolField(TEXT("success"), true);
+	ResultObj->SetStringField(TEXT("old_name"), TargetName);
+	ResultObj->SetStringField(TEXT("widget_name"), NewName);
+	ResultObj->SetBoolField(TEXT("was_variable"), bWasVariable);
+	if (bWasVariable)
+	{
+		ResultObj->SetStringField(TEXT("warning"), TEXT("Variable renamed: graph nodes that used the old name must be re-wired (compile reports them)"));
+	}
 	return ResultObj;
 }
 

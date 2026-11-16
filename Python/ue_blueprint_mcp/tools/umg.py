@@ -129,6 +129,19 @@ def get_tools() -> list[Tool]:
             }
         ),
         Tool(
+            name="rename_widget",
+            description="Rename a widget inside a Widget Blueprint. Updates the widget name and the designer label (duplicate_widget copies the source label, so use this to fix a copy shown with the old name). Compiles the Blueprint. Renaming a variable widget does not rewire graph nodes that used the old name.",
+            inputSchema={
+                "type": "object",
+                "properties": {
+                    "widget_name": {"type": "string", "description": "Name of the Widget Blueprint"},
+                    "target_widget": {"type": "string", "description": "Current name of the widget"},
+                    "new_name": {"type": "string", "description": "New name for the widget"}
+                },
+                "required": ["widget_name", "target_widget", "new_name"]
+            }
+        ),
+        Tool(
             name="remove_widget",
             description="Remove a widget and all its children from a Widget Blueprint (root cannot be removed). Graph nodes referencing removed widgets will cause compile errors.",
             inputSchema={
@@ -197,6 +210,7 @@ TOOL_HANDLERS = {
     "add_image_to_widget": "add_image_to_widget",
     "duplicate_widget": "duplicate_widget",
     "remove_widget": "remove_widget",
+    "rename_widget": "rename_widget",
     "bind_widget_event": "bind_widget_event",
     "add_widget_to_viewport": "add_widget_to_viewport",
     "set_text_block_binding": "set_text_block_binding",

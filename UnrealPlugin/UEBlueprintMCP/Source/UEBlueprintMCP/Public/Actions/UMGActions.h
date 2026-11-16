@@ -89,6 +89,19 @@ protected:
 };
 
 /**
+ * Rename a widget inside a Widget Blueprint (FName and designer display label)
+ */
+class UEBLUEPRINTMCP_API FRenameWidgetAction : public FEditorAction
+{
+public:
+	virtual FString GetActionName() const override { return TEXT("RenameWidget"); }
+
+protected:
+	virtual bool Validate(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context, FString& OutError) override;
+	virtual TSharedPtr<FJsonObject> ExecuteInternal(const TSharedPtr<FJsonObject>& Params, FMCPEditorContext& Context) override;
+};
+
+/**
  * Remove a widget (and its children) from a Widget Blueprint
  */
 class UEBLUEPRINTMCP_API FRemoveWidgetAction : public FEditorAction
